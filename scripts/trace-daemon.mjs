@@ -17,8 +17,12 @@ import { glob, readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const { values: traceOptions } = parseArgs({
+  options: { root: { type: "string" }, entry: { type: "string", multiple: true } },
+});
+const REPO_ROOT = path.resolve(traceOptions.root ?? path.resolve(import.meta.dirname, ".."));
 
 const { sherpaPlatformPackageName } = await import(
   pathToFileURL(
@@ -40,7 +44,10 @@ const sherpaEnvModule =
 // paths. Analyze them at their real importer so nft retains the package exports,
 // manifests and workspace symlinks used by Node's resolution.
 const runtimeDependencies = new Map([
-  ["packages/cli/dist/commands/daemon/local-daemon.js", ["@getpaseo/server"]],
+  [
+    "packages/cli/dist/commands/daemon/local-daemon.js",
+    ["@getpaseo/server", "@getpaseo/server/malleaf-runtime"],
+  ],
   [terminalModule, ["@getpaseo/cli/bin/paseo", "node-pty/package.json"]],
   [sherpaModule, ["sherpa-onnx-node"]],
   [sherpaEnvModule, [`${sherpaPlatformPackageName()}/package.json`]],
@@ -79,6 +86,8 @@ const ptyNativeFiles = (await readdir(ptyNativeRoot, { withFileTypes: true }))
 const entries = [
   "packages/cli/dist/index.js",
   "packages/server/dist/scripts/supervisor-entrypoint.js",
+  "packages/server/dist/server/server/daemon-worker.js",
+  ...(traceOptions.entry ?? []),
   "packages/server/dist/server/terminal/terminal-worker-process.js",
   "packages/server/dist/server/server/speech/providers/local/worker-process.js",
   ...(traceDesktop

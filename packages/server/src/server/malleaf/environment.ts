@@ -8,6 +8,8 @@ import {
 import { assertMalleafHomeIsolated, resolveMalleafHome, canonicalMalleafPath } from "./home.js";
 import { DAEMON_SETTING_ENV_KEYS } from "../config-environment.js";
 
+export { assertMalleafHomeIsolated };
+
 // RFC-0001: Public entry points discard the hosting Paseo environment. Only
 // explicitly namespaced Malleaf options are translated for upstream internals.
 export const MALLEAF_FORWARDED_OPTIONS = [

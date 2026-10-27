@@ -32,7 +32,8 @@
     "packages/relay",
     "packages/website",
     "packages/desktop",
-    "packages/cli"
+    "packages/cli",
+    "packages/malleaf-controller"
   ],
   "scripts": {
     "dev": "npm run dev:server",

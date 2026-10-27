@@ -1,6 +1,6 @@
 # RFC-0002: Personal runtime slots and paired data epochs
 
-- Status: accepted; implementation depends on RFC-0001 verification
+- Status: implementing; pure file operations may proceed on RFC-0001 local acceptance
 - Owner: root implementation agent
 - Architecture: Fable 5.1 source audits, 2026-10-28
 - Independent code reviewer: Opus 5.5
@@ -10,7 +10,9 @@
 
 Build a changed Malleaf daemon, activate the exact tested artifact, and return to the previous working runtime when startup fails or its owner chooses to revert. A personal version can change every project layer, including storage. A rollback therefore selects both code and its corresponding data. Provider binaries and provider-owned conversation history remain external dependencies.
 
-The directory structure and `@getpaseo/*` packages stay in place to retain upstream mergeability. New controller and runner packages own the independent process lifetime. The later job/agent and desktop RFCs add conversational entry points and desktop slot loading; this RFC must not label those later features complete.
+The directory structure and `@getpaseo/*` packages stay in place to retain upstream mergeability. `packages/malleaf-controller` owns the controller and stable runner. The later job/agent and desktop RFCs add conversational entry points and desktop slot loading; this RFC must not label those later features complete.
+
+Fable and root agreed on 2026-10-28 to implement the pure file portions of T1 and T2 on locally accepted foundation commit `a48011a67` while PR #1 runs CI, subsequently fast-forwarded to fixture correction `35d36909f`. Candidate process startup, including the copied-closure acceptance test, remains gated on that CI result. Runtime work is a separate branch and commit series.
 
 ## Layout and process ownership
 
@@ -36,11 +38,11 @@ The stable runner is a last validated copy, rather than an officially locked sou
 
 Keep upstream workspace and protocol versions unchanged. `malleaf.json` records Malleaf's product version (initially `0.1.0`). A personal display string such as `0.1.0.alice-1` is presentation metadata, never a replacement for npm semver or `requirements.paseo` compatibility.
 
-Each slot records product/display version, source commit, upstream commit, builder identity, build time, file count/size, and content hashes. `buildId` hashes a sorted list of relative paths and file hashes, excluding the slot manifest itself (which records those hashes and the resulting identity). Runtime `server_info.malleaf` is optional and includes product/display/buildId/upstream. Consumers compare build identities when both sides report them.
+Each slot records product/display version, source commit, upstream commit, builder identity, build time, and a file inventory with sizes and hashes. Following Opus’s first implementation review, root includes the sorted inventory, executable entry mapping, and provenance in `buildId`. The manifest file itself is excluded to avoid self-reference. Changing a display version or entry mapping produces a new build identity even when executable bytes are identical; verification also requires the expected identity and matching directory name. Runtime `server_info.malleaf` is optional and includes product/display/buildId/upstream. Consumers compare build identities when both sides report them.
 
 Build cleanly before materialization. Use the existing `trace-daemon.mjs` runtime-closure approach and physically copy workspace packages. Recreate workspace links only inside the slot. Reject missing entries, escaping links, incomplete copies, or any failed required gate; never reuse stale worktree dist. Atomically rename a fully materialized staging directory into `versions/<buildId>`.
 
-At every launch, verify the executable entry and registered resource hashes. Full verification belongs to `malleaf doctor`; read-only permissions are an accidental-write guard. These hashes detect incomplete or changed artifacts. They do not authenticate against a local process that can rewrite both files and manifests. Candidate build scripts run arbitrary code; sanitized environment and redirected HOME reduce accidental writes and do not constitute a sandbox.
+At every launch, verify the executable entry and registered resource hashes. Activation also requires full inventory verification; `malleaf doctor` can repeat it independently. Read-only permissions are an accidental-write guard. These hashes detect incomplete or changed artifacts. They do not authenticate against a local process that can rewrite both files and manifests. Candidate build scripts run arbitrary code; sanitized environment and redirected HOME reduce accidental writes and do not constitute a sandbox.
 
 ## Data and rollback contract
 
@@ -48,9 +50,9 @@ The atomic pointer selects `{buildId, dataId}`. After draining and stopping the 
 
 Copy by default, explicitly excluding runtime state. This preserves storage introduced by custom code without requiring the old builder to know every filename. Current known durable state includes agents, projects/workspaces/labels/icons, schedules, finish subscriptions, request receipts/creation journals, plugin settings, Hub relationship, push tokens, CLI identity, desktop attachments, `server-id`, and `daemon-keypair.json`. Identity files must be copied, not regenerated.
 
-Exclude pid lock, local credential, logs/rotation, sockets, `runtime/`, uploads, and obsolete agent timelines. Keep worktrees, installed plugin contents, and models shared outside each epoch. Installed plugin source metadata (`plugins/sources.json`) is shared with the checkout contents. Rewrite config paths under the old epoch's `plugins/` to the new epoch's `plugins/` alias. A trial uninstall can remove a shared plugin checkout; rolling back may then leave that plugin unavailable without blocking daemon startup. A prior home with embedded worktrees needs an explicit one-time relocation before epoch copying.
+Exclude pid lock, local credential, logs/rotation, sockets, `runtime/`, uploads, and obsolete agent timelines. Keep worktrees, installed plugin contents, and models shared outside each epoch. Installed plugin source metadata (`plugins/sources.json`) is shared with the checkout contents. Rewrite config paths under the old epoch's `plugins/` to the new epoch's `plugins/` alias. A trial uninstall can remove a shared plugin checkout; rolling back may then leave that plugin unavailable without blocking daemon startup. The first file-copy implementation refuses embedded shared directories before writing anything. Import migration is a separate transaction: models and plugin contents can be relocated, but Git worktrees must retain their original location as declared legacy shared resources until archived/recreated. The importer must preserve those references rather than move worktree directories with ordinary filesystem operations.
 
-Copy to `data/<id>.partial`, record provenance and hashes, then atomically rename. Use `lstat`; never follow an escaping link. Preserve internal links by rebasing them into the new epoch. For an unknown external link, stop with an actionable decision rather than silently discard possibly durable user data. The current trusted slot owns the data policy (`malleaf.data-policy.json`); undeclared paths default to copied. Large unknown data needs a copy/share decision before activation. Failed or cancelled staging leaves the previous pair usable.
+Copy to `data/<id>.partial`, record provenance and hashes, then atomically rename. Use `lstat`; never follow an escaping link. Preserve internal links by rebasing them into the new epoch. For an unknown external link, stop with an actionable decision rather than silently discard possibly durable user data. The current trusted slot owns the data policy (`malleaf.data-policy.json`); undeclared paths default to copied. Large unknown data needs a copy/share decision before activation. Failed or cancelled staging leaves the previous pair usable. Scan every copied JSON document and the rewritten config for paths into the source epoch; unresolved paths block copying. The scanner currently fails closed on malformed JSON or invalid file URLs; paths embedded in shell commands and home-relative strings require declared migration work. Binary/custom formats and code side effects are not a sandbox boundary. Storage destinations and shared targets reuse RFC-0001’s installed-Paseo path protection. Windows directory symlinks currently require developer mode or symbolic-link privileges; ordinary-user Windows activation is not yet accepted.
 
 Epochs are not automatically removed. Code-only rollback while retaining trial data requires a separate compatibility proof and is deferred. This avoids relying on arbitrary modified code or Zod parsing to promise backward-compatible writes.
 
@@ -64,7 +66,7 @@ The controller begins draining, waits for running/initializing turns and pending
 
 Journal each step: requested, draining, stopped, copying, starting, probing, trial, kept, or rolled back. Only complete epochs and verified slots can be referenced. Startup health must match the expected buildId and server identity, then exercise a real behavior contract. The running trusted controller owns those verdicts; candidate verifier changes cannot approve the candidate itself.
 
-On a failed candidate boot, stop the candidate if it exists, restore the previous pair, and probe recovery. Bound automatic retries (two attempts per pair). If both fail, retain both data sets and diagnostic logs and stop retrying. A stable runner restart must recover from any journal step without launching two daemons against the same state or port. Serialize all pointer-changing operations with `runner/controller.lock`; persist the controller client identity under `runner/`, using clientType `cli`.
+On a failed candidate boot, stop the candidate if it exists, restore the previous pair, and probe recovery. Bound automatic retries (two attempts per pair). If both fail, retain both data sets and diagnostic logs and stop retrying. A stable runner restart must recover from any journal step without launching two daemons against the same state or port. Serialize all pointer-changing operations under the controller’s exclusively bound loopback control socket; `runner/controller.json` records identity but is not an OS lock. Do not reclaim ownership from heartbeat age, a socket timeout, or a racy file rename; persist the controller client identity under `runner/`, using clientType `cli`.
 
 ### Recovery decisions
 
@@ -84,7 +86,7 @@ The first supported baseline includes reversible drain and runtime identity. A d
 
 ```mermaid
 flowchart LR
-  Isolation[RFC-0001 verified] --> T1[Slot and manifest]
+  Isolation[RFC-0001 local acceptance] --> T1[Slot and manifest]
   T1 --> T2[Epoch and atomic pointer]
   T1 --> T3[Lifecycle and drain]
   T2 --> T4[Switch and recovery]
@@ -93,16 +95,22 @@ flowchart LR
   T5 --> T6[Failure injection and independent review]
 ```
 
-| Task                                                                          | Owner       | Status  | Required evidence                                                                                                           |
-| ----------------------------------------------------------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| T1: Controller workspace, artifact manifest, materializer, hash verification  | root        | pending | Real copied closure starts; missing/escaping/changed entry fails; CI/build/knip include new workspace                       |
-| T2: Default-copy epoch policy, shared resource handling, atomic pair store    | root        | pending | Unknown durable file retained; credentials/runtime excluded; partial epoch never selected; original data unchanged          |
-| T3: Public daemon lifecycle adapter and reversible drain lease                | root        | pending | Real supervisor start/stop; incoming turn rejected while existing turn drains; schedule pause/resume; expiry releases lease |
-| T4: Journaled activation, keep/revert, automatic failure recovery             | root        | pending | Healthy switch, failed startup, interrupted transaction, duplicate request, and previous-pair recovery                      |
-| T5: Stable runner, optional build identity, desktop/controller ownership seam | root        | pending | Actual reported buildId changes; fallback survives candidate failure; desktop does not resurrect an old epoch               |
-| T6: Acceptance and code review                                                | root / Opus | pending | Targeted process E2E with isolated HOME, evidence logs, review findings resolved, clear limits                              |
+| Task                                                                          | Owner       | Status      | Required evidence                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| T1: Controller workspace, artifact manifest, materializer, hash verification  | root        | in-progress | Real copied closure starts; missing/escaping/changed entry fails; CI/build/knip include new workspace                       |
+| T2: Default-copy epoch policy, shared resource handling, atomic pair store    | root        | in-progress | Unknown durable file retained; credentials/runtime excluded; partial epoch never selected; original data unchanged          |
+| T3: Public daemon lifecycle adapter and reversible drain lease                | root        | pending     | Real supervisor start/stop; incoming turn rejected while existing turn drains; schedule pause/resume; expiry releases lease |
+| T4: Journaled activation, keep/revert, automatic failure recovery             | root        | pending     | Healthy switch, failed startup, interrupted transaction, duplicate request, and previous-pair recovery                      |
+| T5: Stable runner, optional build identity, desktop/controller ownership seam | root        | pending     | Actual reported buildId changes; fallback survives candidate failure; desktop does not resurrect an old epoch               |
+| T6: Acceptance and code review                                                | root / Opus | pending     | Targeted process E2E with isolated HOME, evidence logs, review findings resolved, clear limits                              |
 
 ## Verification limits
+
+### File-layer implementation evidence
+
+The first implementation covers slot materialization and verification, two-phase epoch planning/copying, and workspace/CI integration. It does not yet implement the pair store, controller lifetime, drain, activation, or desktop loading. T1 and T2 therefore remain in progress.
+
+On 2026-10-28, 18 targeted tests passed across `slot/materialize.test.ts`, `data/epoch.test.ts`, and `dependencies.test.ts` (`/tmp/malleaf-storage-review-tests.log`). They cover detached source closure fixtures, entry tampering, directory identity, installed-Paseo protection, unknown data preservation, source changes during planning, absolute paths in custom JSON, and copying between sibling epochs. Controller typecheck/lint and `build:server` passed (`/tmp/malleaf-runtime-{types,lint,server-build}.log`). The existing CI routing contract passed 21 checks (`/tmp/malleaf-runtime-ci-contract.log`). Opus’s second review closed all three P1 findings; the file-layer implementation has no remaining review blocker. A real copied runtime has not been started.
 
 Unit tests alone do not prove activation. Required process acceptance uses a copied slot and new epoch, confirms runtime build identity and behavior, and proves the previous epoch remains byte-for-byte recoverable after candidate failure. Mock-provider checks and real installed harness checks are reported separately. Local tests remain targeted; full-suite execution belongs to CI.
 

@@ -1,0 +1,31 @@
+{
+  "name": "@malleaf/controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./slot": {
+      "types": "./dist/slot/materialize.d.ts",
+      "default": "./dist/slot/materialize.js"
+    },
+    "./epoch": {
+      "types": "./dist/data/epoch.d.ts",
+      "default": "./dist/data/epoch.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@getpaseo/server": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}
