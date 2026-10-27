@@ -9,8 +9,11 @@ test.each([
   "./runner/pointer.ts",
   "./runner/lease.ts",
   "./runner/initialize.ts",
+  "./runner/journal.ts",
+  "./runner/instances.ts",
   "./runtime/preflight.ts",
   "./runtime/daemon.ts",
+  "./runtime/recovery.ts",
 ])("%s stays independent of the daemon implementation", async (entry) => {
   const result = await build({
     entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
