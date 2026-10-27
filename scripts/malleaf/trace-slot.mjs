@@ -11,6 +11,9 @@ const repoRoot = path.resolve(process.argv[2] ?? ".");
 const entries = {
   supervisor: "packages/server/dist/scripts/supervisor-entrypoint.js",
   worker: "packages/server/dist/server/server/daemon-worker.js",
+  activation: "packages/malleaf-controller/dist/runtime/activation.js",
+  initializer: "packages/malleaf-controller/dist/runner/initialize.js",
+  lease: "packages/malleaf-controller/dist/runner/lease.js",
 };
 const exported = [];
 // Trace the daemon/control API actually shipped in the slot. Unrelated upstream
@@ -60,6 +63,7 @@ try {
       "--root",
       repoRoot,
       ...exported.flatMap((filename) => ["--entry", filename]),
+      ...Object.values(entries).flatMap((filename) => ["--entry", filename]),
     ],
     { cwd: repoRoot, maxBuffer: 32 * 1024 * 1024, env },
   );

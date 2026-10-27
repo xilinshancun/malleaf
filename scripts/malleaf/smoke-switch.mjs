@@ -22,6 +22,7 @@ import { acquireControlLease } from "../../packages/malleaf-controller/dist/runn
 import { openPointerStore } from "../../packages/malleaf-controller/dist/runner/pointer.js";
 import { openSwitchJournal } from "../../packages/malleaf-controller/dist/runner/journal.js";
 import { openInstanceLedger } from "../../packages/malleaf-controller/dist/runner/instances.js";
+import { bindControllerBuild, captureHostState, assertNoSlotProcesses } from "./smoke-audit.mjs";
 import { readDaemonInstance } from "../../packages/server/dist/server/server/daemon-instance.js";
 
 if (!process.argv[2])
@@ -32,6 +33,8 @@ const source = await verifySlot({
   expectedBuildId: path.basename(sourceSlot),
   mode: "full",
 });
+const binding = await bindControllerBuild(source);
+const hostBefore = await captureHostState();
 const prepared = await preparePreflight({ slotDirectory: sourceSlot, mockProvider: true });
 const evidenceRoot = await mkdtemp(path.join(os.tmpdir(), "malleaf-switch-evidence-"));
 process.stderr.write(`Acceptance: ${prepared.root}\nEvidence: ${evidenceRoot}\n`);
@@ -48,7 +51,12 @@ async function variant(display, sourceRoot = sourceSlot) {
     versionsRoot,
     paths: source.files.map((file) => file.path),
     entries: source.entries,
-    provenance: { ...source.provenance, display, createdAt: new Date().toISOString() },
+    provenance: {
+      ...source.provenance,
+      builder: sourceRoot === sourceSlot ? source.provenance.builder : "smoke-switch-fault-fixture",
+      display,
+      createdAt: new Date().toISOString(),
+    },
   });
   manifests.push(slot.manifest);
   return slot;
@@ -104,6 +112,28 @@ const pointer = await openPointerStore({
 });
 const journal = await openSwitchJournal({ home: prepared.home, assertOwned: lease.assertOwned });
 const ledger = await openInstanceLedger({ home: prepared.home, assertOwned: lease.assertOwned });
+// Capture identities from our own onAcquired callback even if the subsequent
+// ledger write fails. Cleanup never uses a command-line/process-list match.
+const pids = new Set();
+const launches = new Map();
+const acquired = new Map();
+const knownByHome = new Map();
+const originalIntent = ledger.intent;
+ledger.intent = async (role, input) => {
+  const result = await originalIntent(role, input);
+  launches.set(input.token, { role, ...input });
+  return result;
+};
+const originalAcquired = ledger.acquired;
+ledger.acquired = async (role, token, instance) => {
+  const intent = launches.get(token);
+  assert.ok(intent, "acquisition must belong to this smoke's launch intent");
+  const acquisition = { ...intent, instance };
+  pids.add(instance.pid);
+  acquired.set(instance.pid, acquisition);
+  knownByHome.set(intent.home, acquisition);
+  return originalAcquired(role, token, instance);
+};
 const options = {
   acceptanceRoot: prepared.root,
   home: prepared.home,
@@ -119,7 +149,6 @@ const options = {
 let controller = await createIsolatedActivation(options);
 let current;
 const stages = [];
-const pids = new Set();
 async function record(label, result) {
   current = result;
   if (result.runtime) pids.add(result.runtime.instance.pid);
@@ -200,7 +229,30 @@ try {
     await delay(25);
   }
   const forward = request({ buildId: nextSlot.manifest.buildId, dataId: "candidate" });
-  await record("trial", await controller.activate(forward));
+  const baselineClient = current.runtime.client;
+  const observation = { active: true };
+  let observedActiveDrain = false;
+  const observer = (async () => {
+    while (observation.active) {
+      const status = await baselineClient.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+      if (status.state === "draining" && status.running.includes(agent.id)) {
+        observedActiveDrain = true;
+        stages.push({ label: "active-during-drain", at: new Date().toISOString(), status });
+        return;
+      }
+      await delay(20);
+    }
+  })();
+  // Attach a rejection handler immediately; await the original promise below so
+  // an observer failure remains a failed acceptance, never an unhandled reject.
+  void observer.catch(() => {});
+  try {
+    await record("trial", await controller.activate(forward));
+  } finally {
+    observation.active = false;
+    await observer;
+  }
+  assert.ok(observedActiveDrain, "drain must be observed while the accepted turn is running");
   assert.equal(current.transaction.step, "trial");
   assert.equal(await note(baseline), "original epoch bytes\n");
   await record("kept", await controller.keep(forward.switchId));
@@ -223,6 +275,16 @@ try {
     await record(dataId, await controller.activate(fault));
     assert.equal(current.transaction.step, "rolled_back");
     assert.deepEqual(current.pointer.current, forward.candidate);
+    assert.match(
+      current.transaction.error,
+      dataId === "startup-fail" ? /cleanup verified.*exit 42/s : /not quiescent/,
+    );
+    assert.equal((await ledger.read()).registrations.candidate, undefined);
+    if (dataId === "probe-fail") {
+      const failed = [...acquired.values()].filter((entry) => entry.home.endsWith("/probe-fail"));
+      assert.equal(failed.length, 1, "probe fault must acquire its own candidate instance");
+      assert.throws(() => process.kill(failed[0].instance.pid, 0), { code: "ESRCH" });
+    }
   }
 
   const interrupted = request({ buildId: baseSlot.manifest.buildId, dataId: "interrupted" });
@@ -256,38 +318,61 @@ try {
       expectedBuildId: manifest.buildId,
       mode: "full",
     });
+  await verifySlot({ directory: sourceSlot, expectedBuildId: source.buildId, mode: "full" });
   completed = true;
 } catch (error) {
   failure = error;
 }
 async function cleanup() {
-  await controller.disconnect();
-  // Only acquired ledger instances are eligible for final test cleanup.
-  const registered = Object.entries((await ledger.read()).registrations);
-  for (const [role, registration] of registered) {
-    if (!registration.instance)
-      throw new Error(`Unresolved ${role} intent retained at ${prepared.root}`);
-    pids.add(registration.instance.pid);
-    await stopRuntimeInstance({
-      daemonHome: registration.home,
-      clientId: randomUUID(),
-      instance: registration.instance,
-      assertOwned: lease.assertOwned,
-    });
-    assert.equal(await readDaemonInstance(registration.home), null);
-    await ledger.clear(role, registration.token);
+  const errors = [];
+  await controller.disconnect().catch((error) => errors.push(error));
+  // Stop all exact acquired instances before reporting unresolved intents. The
+  // memory records survive a poisoned writer and were obtained before its write.
+  for (const registration of knownByHome.values()) {
+    try {
+      await stopRuntimeInstance({
+        daemonHome: registration.home,
+        clientId: randomUUID(),
+        instance: registration.instance,
+        assertOwned: lease.assertOwned,
+      });
+      assert.equal(await readDaemonInstance(registration.home), null);
+    } catch (error) {
+      errors.push(error);
+    }
   }
-  await capture();
-  await lease.release({
-    seal: async () => {
-      await pointer.seal();
-      await journal.seal();
-      await ledger.seal();
-    },
-  });
+  try {
+    for (const [role, registration] of Object.entries((await ledger.read()).registrations)) {
+      if (!registration.instance) {
+        errors.push(new Error(`Unresolved ${role} intent retained at ${prepared.root}`));
+        continue;
+      }
+      assert.equal(await readDaemonInstance(registration.home), null);
+      await ledger.clear(role, registration.token);
+    }
+  } catch (error) {
+    errors.push(error);
+  }
+  await capture().catch((error) => errors.push(error));
+  await lease
+    .release({
+      seal: async () => {
+        await pointer.seal();
+        await journal.seal();
+        await ledger.seal();
+      },
+    })
+    .catch((error) => errors.push(error));
+  if (errors.length) throw new AggregateError(errors, "Acceptance cleanup was incomplete");
 }
+let hostAfter;
+let remainingSlotProcesses;
 try {
   await cleanup();
+  for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  remainingSlotProcesses = await assertNoSlotProcesses(prepared.root);
+  hostAfter = await captureHostState();
+  assert.deepEqual(hostAfter, hostBefore, "Observed host instance/path metadata changed");
 } catch (cleanupError) {
   failure = failure
     ? new AggregateError([failure, cleanupError], "Switch acceptance and cleanup failed", {
@@ -295,9 +380,29 @@ try {
       })
     : cleanupError;
 }
-if (failure) throw failure;
+if (failure) {
+  await writeFile(
+    path.join(evidenceRoot, "failure.json"),
+    JSON.stringify(
+      {
+        sourceCommit: source.provenance.sourceCommit,
+        binding,
+        root: prepared.root,
+        error: String(failure),
+        stack: failure.stack,
+        causes: failure instanceof AggregateError ? failure.errors.map(String) : [],
+        stages,
+        acquired: [...acquired.values()],
+        hostBefore,
+        hostAfter,
+      },
+      null,
+      2,
+    ),
+  );
+  throw failure;
+}
 
-for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 async function makeRemovable(directory) {
   await chmod(directory, 0o700);
   for (const entry of await readdir(directory, { withFileTypes: true }))
@@ -308,6 +413,11 @@ await makeRemovable(prepared.root);
 await prepared.dispose();
 const evidence = {
   sourceCommit: source.provenance.sourceCommit,
+  binding,
+  hostBefore,
+  hostAfter,
+  remainingSlotProcesses,
+  acquired: [...acquired.values()],
   evidenceRoot,
   completed,
   disposed: true,
