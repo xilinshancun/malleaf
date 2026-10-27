@@ -24,6 +24,9 @@ process.env.PASEO_HOME = isolatedHome;
 process.env.MALLEAF_DAEMON_HOME = isolatedHome;
 afterAll(() => rmSync(isolatedHome, { recursive: true, force: true }));
 
+// Restore the test runner's deliberate high cap after removing host overrides.
+// Fake-timer suites otherwise freeze the scheduler before queued work can run.
+process.env.PASEO_GIT_MAX_PROCESSES_PER_SECOND = "10000";
 process.env.PASEO_SUPERVISED = "0";
 process.env.GIT_TERMINAL_PROMPT = "0";
 process.env.GIT_SSH_COMMAND = "ssh -oBatchMode=yes";
