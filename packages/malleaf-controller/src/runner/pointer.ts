@@ -96,34 +96,49 @@ function parsePointer(value: unknown): RuntimePointer {
   return pointer;
 }
 
-async function verifyReferences(home: string, pointer: RuntimePointer): Promise<void> {
+interface PairReference {
+  home: string;
+  pair: RuntimePair;
+}
+
+export async function verifyRuntimePair({ home, pair }: PairReference): Promise<void> {
   const root = await realpath(home);
-  for (const pair of [pointer.current, pointer.previous, pointer.trial?.pair]) {
-    if (!pair) continue;
-    const slotDirectory = path.join(home, "versions", pair.buildId);
-    const epochDirectory = path.join(home, "data", pair.dataId);
-    for (const directory of [slotDirectory, epochDirectory]) {
-      await containedRealPath(root, directory);
-      if (!(await lstat(directory)).isDirectory())
-        throw new StorageError("unsafe_path", "Runtime pairs must refer to physical directories");
-    }
-    await verifySlot({
-      directory: slotDirectory,
-      expectedBuildId: pair.buildId,
-      mode: "entries",
-    });
-    const epochFile = path.join(epochDirectory, "epoch.json");
-    if (!(await lstat(epochFile)).isFile())
-      throw new StorageError("incomplete_artifact", "Epoch manifest must be a regular file");
-    const epoch = z
-      .object({ schemaVersion: z.literal(1), dataId: dataIdSchema, buildIdAtCopy: z.string() })
-      .parse(await readJson(epochFile));
-    if (epoch.dataId !== pair.dataId || epoch.buildIdAtCopy !== pair.buildId)
-      throw new StorageError(
-        "identity_conflict",
-        `Epoch does not belong to the selected build: ${pair.dataId}`,
-      );
+  const slotDirectory = path.join(home, "versions", pair.buildId);
+  const epochDirectory = path.join(home, "data", pair.dataId);
+  for (const directory of [slotDirectory, epochDirectory]) {
+    await containedRealPath(root, directory);
+    if (!(await lstat(directory)).isDirectory())
+      throw new StorageError("unsafe_path", "Runtime pairs must refer to physical directories");
   }
+  await verifySlot({
+    directory: slotDirectory,
+    expectedBuildId: pair.buildId,
+    mode: "entries",
+  });
+  const epochFile = path.join(epochDirectory, "epoch.json");
+  if (!(await lstat(epochFile)).isFile())
+    throw new StorageError("incomplete_artifact", "Epoch manifest must be a regular file");
+  const epoch = z
+    .object({ schemaVersion: z.literal(1), dataId: dataIdSchema, buildIdAtCopy: z.string() })
+    .parse(await readJson(epochFile));
+  if (epoch.dataId !== pair.dataId || epoch.buildIdAtCopy !== pair.buildId)
+    throw new StorageError(
+      "identity_conflict",
+      `Epoch does not belong to the selected build: ${pair.dataId}`,
+    );
+}
+
+async function verifyReferences(home: string, pointer: RuntimePointer): Promise<void> {
+  for (const pair of [pointer.current, pointer.previous, pointer.trial?.pair]) {
+    if (pair) await verifyRuntimePair({ home, pair });
+  }
+}
+
+export async function inspectPointer(home: string): Promise<RuntimePointer> {
+  assertStoragePath(home);
+  const state = await readPointer(home, path.join(home, "runner/current.json"));
+  await verifyRuntimePair({ home, pair: state.pointer.current });
+  return state.pointer;
 }
 
 async function checkPointerPath(home: string, filename: string): Promise<void> {

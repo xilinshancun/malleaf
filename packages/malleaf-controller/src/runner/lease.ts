@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, realpath, rename, rm } from "node:fs/promises";
 import net, { type Socket } from "node:net";
 import path from "node:path";
@@ -13,10 +13,12 @@ const identitySchema = z.object({
   startedAt: z.string().datetime(),
   buildId: z.string().regex(/^[a-f0-9]{64}$/),
   role: z.enum(["init", "controller", "candidate"]),
+  homeId: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type ControllerIdentity = z.infer<typeof identitySchema>;
 
 interface LeaseOptions {
+  home: string;
   port: number;
   buildId: string;
   role: ControllerIdentity["role"];
@@ -59,7 +61,10 @@ export async function identifyController({
 
 export async function acquireControlLease(options: LeaseOptions) {
   z.number().int().min(1).max(65535).parse(options.port);
+  const home = await realpath(options.home);
+  const homeId = createHash("sha256").update(home).digest("hex");
   const identity = identitySchema.parse({
+    homeId,
     type: "identity",
     product: "malleaf",
     pid: process.pid,
@@ -111,6 +116,11 @@ export async function acquireControlLease(options: LeaseOptions) {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error;
     const owner = await identifyController({ port: options.port });
+    if (owner && owner.homeId !== homeId)
+      throw new StorageError(
+        "port_occupied",
+        `Control port ${options.port} belongs to another Malleaf home (${owner.homeId})`,
+      );
     if (owner)
       throw new StorageError(
         "lease_held",
@@ -142,7 +152,7 @@ export async function acquireControlLease(options: LeaseOptions) {
       throw new StorageError("lease_lost", "Control listener lease was lost");
   }
 
-  async function publishIdentity(home: string): Promise<void> {
+  async function publishIdentity(): Promise<void> {
     assertOwned();
     if (identityFile)
       throw new StorageError("state_conflict", "Lease identity was already published");

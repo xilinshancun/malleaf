@@ -1,88 +1,19 @@
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import os from "node:os";
+import { readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { materializeSlot } from "../slot/materialize.js";
+import { createRuntimeFixture, removeFixture } from "../test-fixtures/runtime.js";
 import { executeEpochCopy, planEpochCopy } from "../data/epoch.js";
 import { openPointerStore } from "./pointer.js";
 import { StorageError, writeJsonAtomic } from "../storage.js";
 
 const roots: string[] = [];
-
-async function removeFixture(directory: string): Promise<void> {
-  await chmod(directory, 0o700);
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const filename = path.join(directory, entry.name);
-    if (entry.isDirectory()) await removeFixture(filename);
-    else await rm(filename, { force: true });
-  }
-  await rm(directory, { recursive: true });
-}
-
 afterEach(async () => {
   for (const root of roots.splice(0)) await removeFixture(root);
 });
-
 async function fixture() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "malleaf-pointer-"));
-  roots.push(root);
-  const sourceRoot = path.join(root, "source");
-  const seed = path.join(root, "seed");
-  const home = path.join(root, "product");
-  await mkdir(sourceRoot);
-  await mkdir(seed);
-  const shared = {
-    plugins: path.join(home, "plugins"),
-    worktrees: path.join(home, "worktrees"),
-    models: path.join(home, "models/local-speech"),
-  };
-  await mkdir(shared.plugins, { recursive: true });
-  async function pair(dataId: string) {
-    await writeFile(path.join(sourceRoot, "main.js"), `console.log(${JSON.stringify(dataId)});`);
-    const slot = await materializeSlot({
-      sourceRoot,
-      versionsRoot: path.join(home, "versions"),
-      paths: ["main.js"],
-      entries: { supervisor: "main.js" },
-      provenance: {
-        product: "0.1.0",
-        display: `0.1.0.alice-${dataId}`,
-        sourceCommit: "a".repeat(40),
-        upstream: "b".repeat(40),
-        builder: "test",
-        createdAt: "2026-10-28T00:00:00.000Z",
-      },
-    });
-    const buildId = slot.manifest.buildId;
-    await executeEpochCopy(
-      await planEpochCopy({
-        sourceHome: seed,
-        dataRoot: path.join(home, "data"),
-        dataId,
-        buildId,
-        shared,
-        policy: { schemaVersion: 1, entries: {} },
-      }),
-    );
-    return { buildId, dataId };
-  }
-  return {
-    home,
-    pair,
-    filename: path.join(home, "runner/current.json"),
-    writerToken: "test-controller-token",
-    assertOwned() {},
-  };
+  const runtime = await createRuntimeFixture();
+  roots.push(runtime.root);
+  return runtime;
 }
 
 test("trial, keep and revert atomically retain complete build/data pairs", async () => {

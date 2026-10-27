@@ -30,7 +30,7 @@ test("an exclusive listener identifies its owner and rejects another controller"
   const options = await fixture();
   const lease = await acquireControlLease(options);
   try {
-    await lease.publishIdentity(options.home);
+    await lease.publishIdentity();
     expect(lease.port).toBeGreaterThan(0);
     expect(() => lease.assertOwned()).not.toThrow();
     expect(await identifyController({ port: lease.port })).toEqual({
@@ -40,6 +40,7 @@ test("an exclusive listener identifies its owner and rejects another controller"
       startedAt: lease.identity.startedAt,
       buildId: options.buildId,
       role: "controller",
+      homeId: lease.identity.homeId,
     });
     const before = await readFile(path.join(options.home, "runner/controller.json"), "utf8");
     await expect(acquireControlLease({ ...options, port: lease.port })).rejects.toMatchObject({
@@ -142,12 +143,13 @@ test("kernel ownership excludes another process and is released after owner deat
       "-e",
       `
     const { acquireControlLease } = await import(process.argv[1]);
-    const lease = await acquireControlLease({ port: Number(process.argv[2]), buildId: "a".repeat(64), role: "controller" });
+    const lease = await acquireControlLease({ home: process.argv[3], port: Number(process.argv[2]), buildId: "a".repeat(64), role: "controller" });
     process.send({ port: lease.port, pid: process.pid });
     process.on("disconnect", () => process.exit(1));
   `,
       entry,
       String(options.port),
+      options.home,
     ],
     {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -190,7 +192,7 @@ test("kernel ownership excludes another process and is released after owner deat
 test("advisory identity is replaced only after bind and cleaned before relinquishing ownership", async () => {
   const options = await fixture();
   const lease = await acquireControlLease(options);
-  await lease.publishIdentity(options.home);
+  await lease.publishIdentity();
   const filename = path.join(options.home, "runner/controller.json");
   const firstIdentity = JSON.parse(await readFile(filename, "utf8"));
   expect(firstIdentity).toMatchObject({ token: lease.token, port: lease.port, pid: process.pid });
@@ -200,7 +202,7 @@ test("advisory identity is replaced only after bind and cleaned before relinquis
   expect(JSON.parse(await readFile(filename, "utf8"))).toEqual({ token: "foreign" });
   const next = await acquireControlLease({ ...options, port: lease.port });
   try {
-    await next.publishIdentity(options.home);
+    await next.publishIdentity();
     expect(JSON.parse(await readFile(filename, "utf8"))).toMatchObject({ token: next.token });
   } finally {
     await next.release({ seal: async () => {} });
