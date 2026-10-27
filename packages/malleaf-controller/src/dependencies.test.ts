@@ -14,6 +14,7 @@ test.each([
   "./runtime/preflight.ts",
   "./runtime/daemon.ts",
   "./runtime/recovery.ts",
+  "./runtime/activation.ts",
 ])("%s stays independent of the daemon implementation", async (entry) => {
   const result = await build({
     entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],

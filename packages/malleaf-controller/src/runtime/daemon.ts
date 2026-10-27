@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHostClient } from "@getpaseo/client/node";
 import {
   type DaemonInstance,
+  DaemonInstanceError,
   isSameDaemonInstance,
   readDaemonInstance,
   readLocalCredentialForTarget,
@@ -47,6 +48,20 @@ interface RuntimeStopOptions extends Pick<
   "daemonHome" | "clientId" | "assertOwned"
 > {
   instance: DaemonInstance;
+}
+
+export class RuntimeLaunchError extends Error {
+  constructor(
+    readonly cleanup: "verified" | "unverified",
+    cause: unknown,
+    readonly instance?: DaemonInstance,
+  ) {
+    super(
+      `Runtime launch failed (cleanup ${cleanup}): ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = "RuntimeLaunchError";
+  }
 }
 
 async function connectRuntime(home: string, listen: string, clientId: string, timeoutMs: number) {
@@ -193,9 +208,6 @@ export async function attachRuntime(options: RuntimeAttachOptions) {
 
 // Its caller holds the control lease for the whole returned lifetime.
 export async function launchRuntime(options: RuntimeLaunchOptions) {
-  const { slot, entries, manifest } = await verifyRuntimeSlot(options);
-  if (await readDaemonInstance(options.daemonHome))
-    throw new StorageError("state_conflict", "Refusing to launch over an existing daemon instance");
   const timeoutMs = options.timeoutMs ?? 60_000;
   // daemon-control intentionally leaves a timed-out CLI start alive. An abort
   // deadline instead uses its bounded child cleanup path, even before pid-lock.
@@ -204,9 +216,17 @@ export async function launchRuntime(options: RuntimeLaunchOptions) {
   const signal = AbortSignal.any(signals);
   let acquired: DaemonInstance | undefined;
   let recording = Promise.resolve();
+  let spawnAttempted = false;
 
   try {
+    const { slot, entries, manifest } = await verifyRuntimeSlot(options);
+    if (await readDaemonInstance(options.daemonHome))
+      throw new StorageError(
+        "state_conflict",
+        "Refusing to launch over an existing daemon instance",
+      );
     options.assertOwned();
+    spawnAttempted = true;
     const started = await startDaemonInstance({
       home: options.daemonHome,
       command: process.execPath,
@@ -236,19 +256,33 @@ export async function launchRuntime(options: RuntimeLaunchOptions) {
     });
     return await connectRuntimeHandle(options, manifest, instance);
   } catch (error) {
+    // No outstanding ledger write may race a caller clearing a failed launch.
+    await recording.catch(() => undefined);
+    let cleanup: "verified" | "unverified" =
+      !spawnAttempted ||
+      (error instanceof DaemonInstanceError && error.code === "DAEMON_START_FAILED")
+        ? "verified"
+        : "unverified";
     if (acquired) {
       try {
         await stopRuntimeInstance({ ...options, instance: acquired });
+        cleanup = "verified";
       } catch (cleanupError) {
         // AggregateError retains both failures; its options are the third argument.
         // oxlint-disable-next-line preserve-caught-error
-        throw new AggregateError(
-          [error, cleanupError],
-          "Runtime launch failed and its stop could not be confirmed",
-          { cause: cleanupError },
+        throw new RuntimeLaunchError(
+          "unverified",
+          new AggregateError(
+            [error, cleanupError],
+            "Runtime launch failed and its stop could not be confirmed",
+            { cause: cleanupError },
+          ),
+          acquired,
         );
       }
     }
-    throw error;
+    throw new RuntimeLaunchError(cleanup, error, acquired);
   }
 }
+
+export type RuntimeHandle = Awaited<ReturnType<typeof launchRuntime>>;
