@@ -64,7 +64,7 @@ async function resolveAgentTarget(
       const error: CommandError = {
         code: "AGENT_NOT_FOUND",
         message: `Agent not found: ${agentId}`,
-        details: 'Use "paseo ls" to list available agents',
+        details: 'Use "malleaf ls" to list available agents',
       };
       throw error;
     }

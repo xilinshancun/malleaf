@@ -80,11 +80,13 @@ console.log("=== CLI IPC Target Helpers ===\n");
 {
   const target = selectDaemonTarget(
     { home: "/tmp/selected-home" },
-    { PASEO_HOST: "ignored:12345", PASEO_LISTEN: "ignored:23456" },
+    { PASEO_HOST: "ignored:12345", MALLEAF_LISTEN: "ignored:23456" },
   );
   assert.deepStrictEqual(target, { kind: "instance", home: "/tmp/selected-home" });
   assert.strictEqual(getDaemonHost({ target }), "home /tmp/selected-home");
-  assert.throws(() => selectDaemonTarget({}, { PASEO_HOME: "/tmp/a", PASEO_HOST: "unused:12345" }));
+  assert.throws(() =>
+    selectDaemonTarget({}, { MALLEAF_DAEMON_HOME: "/tmp/a", PASEO_HOST: "unused:12345" }),
+  );
 }
 
 {

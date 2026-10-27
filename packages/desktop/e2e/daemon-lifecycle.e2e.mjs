@@ -19,12 +19,17 @@ const root = await mkdtemp(path.join(tmpdir(), "paseo desktop lifecycle "));
 const home = path.join(root, "daemon");
 const env = Object.fromEntries(
   Object.entries(process.env).filter(
-    ([key]) => !key.startsWith("PASEO_") && key !== "ELECTRON_RUN_AS_NODE",
+    ([key]) =>
+      !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_") && key !== "ELECTRON_RUN_AS_NODE",
   ),
 );
 env.HOME = root;
+env.CODEX_HOME = path.join(root, ".codex");
+env.CLAUDE_CONFIG_DIR = path.join(root, ".claude");
+env.MALLEAF_TEST = "1";
 env.USERPROFILE = root;
-env.PASEO_HOME = home;
+env.MALLEAF_DAEMON_HOME = home;
+env.MALLEAF_HOME = path.join(root, "malleaf");
 const server = net.createServer();
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;

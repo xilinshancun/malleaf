@@ -44,7 +44,7 @@ async function setup(): Promise<void> {
   try {
     ctx = await createE2ETestContext({ timeout: 45000 });
     console.log(`Test daemon started on port ${ctx.port}`);
-    console.log(`PASEO_HOME: ${ctx.paseoHome}`);
+    console.log(`MALLEAF_DAEMON_HOME: ${ctx.paseoHome}`);
     console.log(`Work directory: ${ctx.workDir}`);
   } catch (err) {
     console.error("Failed to start test daemon:", err);

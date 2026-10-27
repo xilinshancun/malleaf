@@ -9,7 +9,7 @@ const { extractFile } = require("@electron/asar");
 const { WebSocket } = require("ws");
 const assert = require("node:assert/strict");
 
-const EXECUTABLE_NAME = "Paseo";
+const EXECUTABLE_NAME = "Malleaf";
 const SMOKE_TIMEOUT_MS = 60_000;
 const EXIT_TIMEOUT_MS = 10_000;
 const TERMINAL_CAPTURE_ATTEMPTS = 20;
@@ -149,18 +149,25 @@ function getShellCommand(script) {
 
 function createDefaultDaemonEnv(extraEnv) {
   return {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_"))),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+      ),
+    ),
     ...extraEnv,
   };
 }
 
-function createIsolatedDesktopEnv({ home, listen, userData, cdpPort }) {
+function createIsolatedDesktopEnv({ home, osHome, listen, userData, cdpPort }) {
   return {
-    ...createDefaultDaemonEnv({ HOME: home, USERPROFILE: home }),
-    PASEO_HOME: home,
-    PASEO_LISTEN: listen,
-    PASEO_ELECTRON_USER_DATA_DIR: userData,
-    PASEO_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
+    ...createDefaultDaemonEnv({ HOME: osHome, USERPROFILE: osHome }),
+    MALLEAF_HOME: path.join(osHome, ".malleaf"),
+    CODEX_HOME: path.join(osHome, ".codex"),
+    CLAUDE_CONFIG_DIR: path.join(osHome, ".claude"),
+    MALLEAF_DAEMON_HOME: home,
+    MALLEAF_LISTEN: listen,
+    MALLEAF_ELECTRON_USER_DATA_DIR: userData,
+    MALLEAF_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
   };
 }
 
@@ -462,13 +469,13 @@ async function waitForPackagedAppPage(browser, deadline) {
     const page = browser
       .contexts()
       .flatMap((context) => context.pages())
-      .find((candidate) => candidate.url().startsWith("paseo://app/"));
+      .find((candidate) => candidate.url().startsWith("malleaf://app/"));
     if (page) {
       return page;
     }
     await delay(250);
   }
-  throw new Error("Timed out waiting for the packaged paseo://app/ renderer");
+  throw new Error("Timed out waiting for the packaged malleaf://app/ renderer");
 }
 
 async function assertPackagedRendererLoaded(page, deadline) {
@@ -645,7 +652,12 @@ async function smokeColdCliDaemonStart({ appPath }) {
   const pidPath = path.join(home, "paseo.pid");
   const port = await reserveLocalTcpPort();
   const listen = `127.0.0.1:${port}`;
-  const env = createDefaultDaemonEnv({ HOME: home, USERPROFILE: home });
+  const osHome = createTempDir("malleaf-cold-cli-os-home-");
+  const env = createDefaultDaemonEnv({
+    HOME: osHome,
+    USERPROFILE: osHome,
+    MALLEAF_DAEMON_HOME: home,
+  });
   configureIsolatedDaemonHome(home, listen);
 
   try {
@@ -689,6 +701,7 @@ async function smokeColdCliDaemonStart({ appPath }) {
       });
     }
     await removeTempDir(home);
+    await removeTempDir(osHome);
   }
 }
 
@@ -874,6 +887,7 @@ async function smokePackagedDesktopApp({
   assertLinuxDesktopIdentity(appPath);
   await smokeColdCliDaemonStart({ appPath });
 
+  const osHome = createTempDir("malleaf-desktop-os-home-");
   const userData = createTempDir("paseo-smoke-user-data-");
   const daemonHome = createTempDir("paseo-smoke-daemon-home-");
   const daemonPort = await reserveLocalTcpPort();
@@ -888,6 +902,7 @@ async function smokePackagedDesktopApp({
   configureIsolatedDaemonHome(daemonHome, listen);
   const env = createIsolatedDesktopEnv({
     home: daemonHome,
+    osHome,
     listen,
     userData,
     cdpPort,
@@ -982,6 +997,7 @@ async function smokePackagedDesktopApp({
     releaseChildHandles(child);
     await removeTempDir(userData);
     await removeTempDir(daemonHome);
+    await removeTempDir(osHome);
   }
 }
 
@@ -993,7 +1009,7 @@ if (require.main === module) {
   const appIndex = process.argv.indexOf("--app");
   const appPath = appIndex >= 0 ? process.argv[appIndex + 1] : null;
   if (!appPath) {
-    process.stderr.write("Usage: node smoke-packaged-desktop-app.js --app <Paseo.app>\n");
+    process.stderr.write("Usage: node smoke-packaged-desktop-app.js --app <Malleaf.app>\n");
     process.exit(2);
   }
 

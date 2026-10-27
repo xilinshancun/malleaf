@@ -1,3 +1,5 @@
+import { malleafIdentity } from "./malleaf/initialize.js";
+import { initializeMalleafEnvironment } from "@getpaseo/server/malleaf-runtime";
 import { protectConsoleStreams } from "./diagnostics/console-streams.js";
 protectConsoleStreams();
 
@@ -7,7 +9,7 @@ import log from "electron-log/main";
 log.transports.console.level = "info";
 log.initialize({ spyRendererConsole: true });
 
-import { inheritLoginShellEnv } from "./login-shell-env.js";
+import { inheritLoginShellEnv as inheritShellEnv } from "./login-shell-env.js";
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -112,10 +114,10 @@ import {
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
-const APP_SCHEME = "paseo";
+const APP_SCHEME = malleafIdentity.urlScheme;
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
+const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || malleafIdentity.name;
 const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   platform: process.platform,
   override: process.env.PASEO_DESKTOP_WINDOW_CONTROLS,
@@ -324,7 +326,10 @@ if (forcedUserDataDir) {
     );
     const isWorktree = path.resolve(topLevel, ".git") !== commonDir;
     if (isWorktree) {
-      app.setPath("userData", path.join(app.getPath("appData"), `Paseo-${devWorktreeName}`));
+      app.setPath(
+        "userData",
+        path.join(app.getPath("appData"), `${malleafIdentity.name}-${devWorktreeName}`),
+      );
       log.info("[worktree] isolated userData for worktree:", devWorktreeName);
     } else {
       devWorktreeName = null;
@@ -348,8 +353,9 @@ if (electronFlags) {
 
 if (process.platform === "linux") {
   // Keep the desktop/dock identity independent of the wrapped Electron filename.
-  app.setDesktopName("Paseo.desktop");
-  if (!app.commandLine.hasSwitch("class")) app.commandLine.appendSwitch("class", "Paseo");
+  app.setDesktopName(`${malleafIdentity.name}.desktop`);
+  if (!app.commandLine.hasSwitch("class"))
+    app.commandLine.appendSwitch("class", malleafIdentity.name);
   log.info("[linux-sandbox]", {
     enabled: !app.commandLine.hasSwitch("no-sandbox"),
     reason: process.env.PASEO_DESKTOP_SANDBOX_REASON ?? "Chromium default",
@@ -1016,7 +1022,10 @@ async function bootstrap(): Promise<void> {
 void runDesktopStartup({
   hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
   runCliPassthroughIfRequested,
-  inheritLoginShellEnv,
+  inheritLoginShellEnv: () => {
+    inheritShellEnv();
+    initializeMalleafEnvironment();
+  },
   bootstrapGui: bootstrap,
 }).catch((error) => {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);

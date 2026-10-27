@@ -1,4 +1,8 @@
 import { configurationEnvironment } from "./config-environment.js";
+import {
+  malleafIdentity,
+  malleafDaemonEndpoint,
+} from "@getpaseo/protocol/malleaf/product-identity";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,9 +39,9 @@ export {
   type PersistedConfig,
 } from "./persisted-config.js";
 
-const DEFAULT_PORT = 6767;
+const DEFAULT_PORT = malleafIdentity.daemonPort;
 const DEFAULT_RELAY_ENDPOINT = "relay.paseo.sh:443";
-const DEFAULT_APP_BASE_URL = "https://app.paseo.sh";
+const DEFAULT_APP_BASE_URL = `http://${malleafDaemonEndpoint}`;
 const DEFAULT_TRUSTED_PROXIES = ["loopback"];
 
 interface ResolveBundledWebUiDistDirInput {
@@ -602,8 +606,7 @@ export function resolveConfigFromPersisted(
 ): PaseoDaemonConfig {
   const env = configurationEnvironment(options?.env ?? process.env);
   const cli = options?.cli;
-  const relayEnabledFallback =
-    options?.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined;
+  const relayEnabledFallback = options?.relayEnabledFallback ?? false;
   const { overrideControlledPaths, ...settings } = resolveReloadableConfig(persisted, options);
   const relay = resolveRelayConfig({
     env,
@@ -663,14 +666,13 @@ export function resolveReloadableConfig(
     persisted,
     cliRelayEnabled: cli?.relayEnabled,
     cliRelayUseTls: cli?.relayUseTls,
-    enabledFallback:
-      options?.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined,
+    enabledFallback: options?.relayEnabledFallback ?? false,
   });
   return {
     ...resolveStaticLoadConfigSettings(env, cli, persisted),
     corsAllowedOrigins: resolveCorsAllowedOrigins(env, persisted),
     git: resolveGitProcessConfig(env, persisted),
-    enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
+    enableTerminalAgentHooks: false,
     skillSelection: persisted.agents?.skills?.selection,
     pluginsEnabled: persisted.pluginsEnabled ?? false,
     plugins: persisted.plugins,

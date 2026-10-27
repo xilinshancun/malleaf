@@ -15,8 +15,8 @@ export function getE2EDaemonPort(): string {
   if (!port) {
     throw new Error("E2E_DAEMON_PORT is not set (expected from the Playwright worker fixture).");
   }
-  if (port === "6767") {
-    throw new Error("E2E_DAEMON_PORT must not point at the developer daemon (6767).");
+  if (["6767", "6768", "6777", "6778"].includes(port)) {
+    throw new Error("E2E_DAEMON_PORT must not point at an installed or development daemon.");
   }
   return port;
 }

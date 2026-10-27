@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { MALLEAF_RUNTIME_CONTROL_KEYS } from "@getpaseo/protocol/malleaf/product-identity";
 import {
   buildSelfNodeCommand,
   createExternalCommandProcessEnv,
@@ -70,6 +71,21 @@ describe("paseo env contract", () => {
     expect(env.CUSTOM).toBe("value");
     expect(env.NODE_ENV).toBe("development");
     expect(env.PATH).toBe("/custom/bin");
+  });
+
+  test("agent children retain their parent target but never inherit runtime launch controls", () => {
+    const controls = Object.fromEntries(
+      MALLEAF_RUNTIME_CONTROL_KEYS.map((key) => [key, "parent-control"]),
+    );
+    const env = createExternalProcessEnv(
+      { ...baseEnv, ...controls, MALLEAF_DAEMON_HOME: "/parent/daemon" },
+      controls,
+    );
+    for (const key of MALLEAF_RUNTIME_CONTROL_KEYS) expect(env[key]).toBeUndefined();
+    expect(env.MALLEAF_DAEMON_HOME).toBe("/parent/daemon");
+    expect(env.MALLEAF_AGENT_ID).toBe("agent-123");
+    const cleared = createExternalProcessEnv(env, { PASEO_AGENT_ID: undefined });
+    expect(cleared.MALLEAF_AGENT_ID).toBeUndefined();
   });
 
   test("builds external command env without process.execPath special-casing", () => {

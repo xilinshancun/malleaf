@@ -7,8 +7,8 @@ const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const WEBSITE_PUBLIC = fileURLToPath(new URL("../../public", import.meta.url));
 // Each README invites sponsors to the sponsor page in its own language, where the website has one.
 const READMES = [
-  { readme: "README.md", sponsorPage: "https://paseo.sh/sponsor" },
-  { readme: "README.zh-CN.md", sponsorPage: "https://paseo.sh/zh-CN/sponsor" },
+  { readme: "README.paseo.md", sponsorPage: "https://paseo.sh/sponsor" },
+  { readme: "README.paseo.zh-CN.md", sponsorPage: "https://paseo.sh/zh-CN/sponsor" },
   { readme: "README.ja.md", sponsorPage: "https://paseo.sh/sponsor" },
   { readme: "README.ko.md", sponsorPage: "https://paseo.sh/sponsor" },
 ];

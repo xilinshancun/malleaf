@@ -17,10 +17,10 @@ console.log("=== Windows Daemon Status Process Lookup ===\n");
 const paseoHome = await mkdtemp(join(tmpdir(), "paseo-windows-status-home-"));
 const port = await getAvailablePort();
 const env = {
-  PASEO_HOME: paseoHome,
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
-  PASEO_DICTATION_ENABLED: "0",
-  PASEO_VOICE_MODE_ENABLED: "0",
+  MALLEAF_DAEMON_HOME: paseoHome,
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+  MALLEAF_DICTATION_ENABLED: "0",
+  MALLEAF_VOICE_MODE_ENABLED: "0",
 };
 
 try {

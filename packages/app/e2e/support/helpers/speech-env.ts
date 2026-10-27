@@ -14,6 +14,7 @@ const DISABLED_E2E_SPEECH_ENV = {
   PASEO_VOICE_TURN_DETECTION_PROVIDER: "openai",
   PASEO_VOICE_STT_PROVIDER: "openai",
   PASEO_VOICE_TTS_PROVIDER: "openai",
+  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "false",
 } as const;
 
 export function withDisabledE2ESpeechEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -26,6 +27,10 @@ export function withDisabledE2ESpeechEnv(env: NodeJS.ProcessEnv): NodeJS.Process
 
   for (const key of LOCAL_SPEECH_ENV_KEYS) {
     delete next[key];
+    delete next[key.replace(/^PASEO_/, "MALLEAF_")];
+  }
+  for (const [key, value] of Object.entries(DISABLED_E2E_SPEECH_ENV)) {
+    next[key.replace(/^PASEO_/, "MALLEAF_")] = value;
   }
 
   return next;

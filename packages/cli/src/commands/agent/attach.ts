@@ -108,7 +108,7 @@ export async function runAttachCommand(
 ): Promise<void> {
   if (!id) {
     console.error("Error: Agent ID required");
-    console.error("Usage: paseo attach <id>");
+    console.error("Usage: malleaf attach <id>");
     process.exit(1);
   }
 
@@ -118,7 +118,7 @@ export async function runAttachCommand(
     const fetchResult = await client.fetchAgent({ agentId: id });
     if (!fetchResult) {
       console.error(`Error: No agent found matching: ${id}`);
-      console.error("Use `paseo ls` to list available agents");
+      console.error("Use `malleaf ls` to list available agents");
       await client.close();
       process.exit(1);
     }

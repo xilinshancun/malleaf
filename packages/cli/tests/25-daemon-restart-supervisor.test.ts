@@ -23,9 +23,9 @@ import { getAvailablePort } from "./helpers/network.ts";
 const pollIntervalMs = 100;
 const daemonReadyTimeoutMs = 120_000;
 const testEnv = {
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
-  PASEO_DICTATION_ENABLED: process.env.PASEO_DICTATION_ENABLED ?? "0",
-  PASEO_VOICE_MODE_ENABLED: process.env.PASEO_VOICE_MODE_ENABLED ?? "0",
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
+  MALLEAF_DICTATION_ENABLED: process.env.MALLEAF_DICTATION_ENABLED ?? "0",
+  MALLEAF_VOICE_MODE_ENABLED: process.env.MALLEAF_VOICE_MODE_ENABLED ?? "0",
 };
 
 function sleep(ms: number): Promise<void> {
@@ -100,7 +100,7 @@ import('node:fs').then(({appendFileSync}) => {
       }),
     );
   }
-  console.log("Test 1: start supervisor-entrypoint in dev mode with isolated PASEO_HOME");
+  console.log("Test 1: start supervisor-entrypoint in dev mode with isolated MALLEAF_DAEMON_HOME");
 
   supervisorProcess = spawn(
     process.execPath,
@@ -109,14 +109,16 @@ import('node:fs').then(({appendFileSync}) => {
       cwd: cliRoot,
       env: {
         ...Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_")),
+          Object.entries(process.env).filter(
+            ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+          ),
         ),
         HOME: paseoHome,
         USERPROFILE: paseoHome,
         ...testEnv,
-        PASEO_HOME: paseoHome,
-        PASEO_LISTEN: host,
-        PASEO_RELAY_ENABLED: "false",
+        MALLEAF_DAEMON_HOME: paseoHome,
+        MALLEAF_LISTEN: host,
+        MALLEAF_RELAY_ENABLED: "false",
         CI: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],

@@ -22,6 +22,7 @@ import {
 } from "../executable-resolution/executable-resolution.js";
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
 import type { TerminalActivity, TerminalActivityState } from "@getpaseo/protocol/terminal-activity";
 
@@ -485,7 +486,8 @@ function resolvePaseoCliShim(binDir: string): string | null {
 }
 
 function paseoCliShimNames(): string[] {
-  return process.platform === "win32" ? ["paseo.cmd", "paseo.exe", "paseo"] : ["paseo"];
+  const name = malleafIdentity.cliName;
+  return process.platform === "win32" ? [`${name}.cmd`, `${name}.exe`, name] : [name];
 }
 
 function resolveZshShellIntegrationRuntimeDir(): string {

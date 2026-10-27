@@ -1,7 +1,8 @@
 #!/usr/bin/env npx tsx
+import { CLI_BIN_PATH } from "./helpers/cli-path.js";
 
 /**
- * Regression: `paseo daemon stop` must leave a reachable daemon alone when the
+ * Regression: `malleaf daemon stop` must leave a reachable daemon alone when the
  * selected home points at a dead supervisor owner.
  */
 
@@ -19,9 +20,9 @@ $.verbose = false;
 
 const pollIntervalMs = 100;
 const testEnv = {
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
-  PASEO_DICTATION_ENABLED: process.env.PASEO_DICTATION_ENABLED ?? "0",
-  PASEO_VOICE_MODE_ENABLED: process.env.PASEO_VOICE_MODE_ENABLED ?? "0",
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
+  MALLEAF_DICTATION_ENABLED: process.env.MALLEAF_DICTATION_ENABLED ?? "0",
+  MALLEAF_VOICE_MODE_ENABLED: process.env.MALLEAF_VOICE_MODE_ENABLED ?? "0",
 };
 
 function sleep(ms: number): Promise<void> {
@@ -66,7 +67,7 @@ interface DaemonStatus {
 
 async function readDaemonStatus(paseoHome: string): Promise<DaemonStatus> {
   const result =
-    await $`PASEO_HOME=${paseoHome} PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD} PASEO_DICTATION_ENABLED=${testEnv.PASEO_DICTATION_ENABLED} PASEO_VOICE_MODE_ENABLED=${testEnv.PASEO_VOICE_MODE_ENABLED} npx paseo daemon status --home ${paseoHome} --json`.nothrow();
+    await $`MALLEAF_DAEMON_HOME=${paseoHome} MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD} MALLEAF_DICTATION_ENABLED=${testEnv.MALLEAF_DICTATION_ENABLED} MALLEAF_VOICE_MODE_ENABLED=${testEnv.MALLEAF_VOICE_MODE_ENABLED} ${process.execPath} ${CLI_BIN_PATH} daemon status --home ${paseoHome} --json`.nothrow();
   if (result.exitCode !== 0) {
     return { localDaemon: null, connectedDaemon: null, pid: null };
   }
@@ -136,9 +137,9 @@ try {
       env: {
         ...process.env,
         ...testEnv,
-        PASEO_HOME: paseoHome,
-        PASEO_LISTEN: host,
-        PASEO_RELAY_ENABLED: "false",
+        MALLEAF_DAEMON_HOME: paseoHome,
+        MALLEAF_LISTEN: host,
+        MALLEAF_RELAY_ENABLED: "false",
         CI: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -166,7 +167,7 @@ try {
 
   console.log("Test 2: home-selected stop leaves the unowned reachable worker running");
   const stopResult =
-    await $`PASEO_HOME=${paseoHome} PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD} PASEO_DICTATION_ENABLED=${testEnv.PASEO_DICTATION_ENABLED} PASEO_VOICE_MODE_ENABLED=${testEnv.PASEO_VOICE_MODE_ENABLED} npx paseo daemon stop --home ${paseoHome} --json`.nothrow();
+    await $`MALLEAF_DAEMON_HOME=${paseoHome} MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD} MALLEAF_DICTATION_ENABLED=${testEnv.MALLEAF_DICTATION_ENABLED} MALLEAF_VOICE_MODE_ENABLED=${testEnv.MALLEAF_VOICE_MODE_ENABLED} ${process.execPath} ${CLI_BIN_PATH} daemon stop --home ${paseoHome} --json`.nothrow();
   assert.strictEqual(stopResult.exitCode, 0, `stop should succeed: ${stopResult.stderr}`);
   const stopJson = JSON.parse(stopResult.stdout) as {
     action?: unknown;
@@ -193,7 +194,7 @@ try {
     });
   }
 
-  await $`PASEO_HOME=${paseoHome} PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD} PASEO_DICTATION_ENABLED=${testEnv.PASEO_DICTATION_ENABLED} PASEO_VOICE_MODE_ENABLED=${testEnv.PASEO_VOICE_MODE_ENABLED} npx paseo daemon stop --home ${paseoHome} --force`.nothrow();
+  await $`MALLEAF_DAEMON_HOME=${paseoHome} MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD} MALLEAF_DICTATION_ENABLED=${testEnv.MALLEAF_DICTATION_ENABLED} MALLEAF_VOICE_MODE_ENABLED=${testEnv.MALLEAF_VOICE_MODE_ENABLED} ${process.execPath} ${CLI_BIN_PATH} daemon stop --home ${paseoHome} --force`.nothrow();
   await rm(paseoHome, { recursive: true, force: true });
 }
 

@@ -3,7 +3,7 @@
 /**
  * Follow commands stop when nobody reads their output
  *
- * `paseo agent logs --follow` and `paseo agent attach` stream until they are
+ * `malleaf agent logs --follow` and `malleaf agent attach` stream until they are
  * stopped. A program that closes its end of their stdout, as `| head` or a
  * launcher that discards output does, stops them the same way Ctrl+C does.
  */
@@ -31,7 +31,7 @@ try {
     ["agent", "logs", agent.id, "--follow"],
     ["agent", "attach", agent.id],
   ]) {
-    const label = `paseo ${args.slice(0, 2).join(" ")}`;
+    const label = `malleaf ${args.slice(0, 2).join(" ")}`;
     console.log(`Test: ${label} exits when its stdout reader is gone`);
     const result = await runPaseoCli(daemon, [...args, "--host", host], {
       closedStdout: true,

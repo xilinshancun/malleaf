@@ -20,7 +20,21 @@ function resolveServerRunnerFromDir(currentDir: string): string | null {
   }
 }
 
-function resolveDaemonRunnerEntry(): string {
+export function resolveDaemonRunnerEntry(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.MALLEAF_DAEMON_ENTRY;
+  if (explicit !== undefined) {
+    if (!path.isAbsolute(explicit) || !existsSync(explicit)) {
+      throw new Error(
+        "MALLEAF_DAEMON_ENTRY must name an existing absolute entry point; no dist fallback is permitted.",
+      );
+    }
+    return explicit;
+  }
+  if (env.MALLEAF_CANDIDATE === "1") {
+    throw new Error(
+      "Candidate startup requires MALLEAF_DAEMON_ENTRY from a successful clean build.",
+    );
+  }
   const serverExportPath = require.resolve("@getpaseo/server");
   let currentDir = path.dirname(serverExportPath);
 
@@ -52,7 +66,7 @@ export async function launchLocalDaemon(options: {
   try {
     const entry = resolveDaemonRunnerEntry();
     return await startDaemonInstance({
-      home: resolvePaseoHome({ PASEO_HOME: options.home }),
+      home: resolvePaseoHome({ MALLEAF_DAEMON_HOME: options.home }),
       command: process.execPath,
       args: [...(entry.endsWith(".ts") ? ["--import", "tsx"] : []), entry],
       env: process.env,
@@ -103,7 +117,7 @@ export function rejectRemovedLaunchFlags(command: Command): Command {
       if (command.getOptionValueSource(name) !== "cli") continue;
       throw {
         code: "REMOVED_LAUNCH_OPTION",
-        message: `${flag.split(" ")[0]} was removed. ${configPath ? `Use paseo daemon config set ${configPath} <value> --home <path>, then start or restart.` : "Use paseo daemon run --home <path> for foreground deployment."} Deployment environment overrides belong to paseo daemon run.`,
+        message: `${flag.split(" ")[0]} was removed. ${configPath ? `Use malleaf daemon config set ${configPath} <value> --home <path>, then start or restart.` : "Use malleaf daemon run --home <path> for foreground deployment."} Deployment environment overrides belong to malleaf daemon run.`,
       };
     }
   });

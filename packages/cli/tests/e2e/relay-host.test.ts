@@ -180,7 +180,7 @@ async function waitForDaemonRelayRegistered(offerUrl: string, timeoutMs = 30_000
     ctx = await createE2ETestContext({
       timeout: 60_000,
       env: {
-        PASEO_RELAY_ENABLED: "true",
+        MALLEAF_RELAY_ENABLED: "true",
         PASEO_RELAY_ENDPOINT: relayEndpoint,
         PASEO_RELAY_PUBLIC_ENDPOINT: relayEndpoint,
       },
@@ -210,7 +210,7 @@ async function waitForDaemonRelayRegistered(offerUrl: string, timeoutMs = 30_000
     }
   }, SHUTDOWN_TIMEOUT_MS);
 
-  it("runs `paseo --host <offer-url> ls` over the relay and matches direct ls output", async () => {
+  it("runs `malleaf --host <offer-url> ls` over the relay and matches direct ls output", async () => {
     if (!ctx) throw new Error("test context not initialized");
 
     const direct = await ctx.paseo(["ls", "--json"]);

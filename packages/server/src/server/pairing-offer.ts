@@ -1,4 +1,6 @@
 import type { Logger } from "pino";
+import { malleafDaemonEndpoint } from "@getpaseo/protocol/malleaf/product-identity";
+import { assertRelayAppUrl } from "./malleaf/remote-app.js";
 
 import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "./connection-offer.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
@@ -24,7 +26,7 @@ export async function generateLocalPairingOffer(args: {
   includeQr?: boolean;
   logger?: Logger;
 }): Promise<LocalPairingOffer> {
-  const relayEnabled = args.relayEnabled ?? true;
+  const relayEnabled = args.relayEnabled ?? false;
   if (!relayEnabled) {
     return {
       relayEnabled: false,
@@ -37,7 +39,8 @@ export async function generateLocalPairingOffer(args: {
   const relayPublicEndpoint = args.relayPublicEndpoint ?? relayEndpoint;
   const relayUseTls = args.relayUseTls ?? relayEndpoint === "relay.paseo.sh:443";
   const relayPublicUseTls = args.relayPublicUseTls ?? relayUseTls;
-  const appBaseUrl = args.appBaseUrl ?? "https://app.paseo.sh";
+  const appBaseUrl = args.appBaseUrl ?? `http://${malleafDaemonEndpoint}`;
+  assertRelayAppUrl(appBaseUrl);
   const serverId = getOrCreateServerId(args.paseoHome, { logger: args.logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(args.paseoHome, args.logger);
   const offer = await createConnectionOfferV2({

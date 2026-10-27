@@ -176,10 +176,10 @@ interface AgentLsClient {
 
 /**
  * Agent ls command semantics:
- * - `paseo agent ls`    → active non-archived agents
- * - `paseo agent ls -g` → global non-archived agents
- * - `paseo agent ls -a` → all agents, including archived and background
- * - `paseo agent ls -ag` → global agents, including archived
+ * - `malleaf agent ls`    → active non-archived agents
+ * - `malleaf agent ls -g` → global non-archived agents
+ * - `malleaf agent ls -a` → all agents, including archived and background
+ * - `malleaf agent ls -ag` → global agents, including archived
  */
 export async function runLsCommand(
   options: AgentLsOptions,

@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, realpath } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { isolatedDaemonEnvironment } from "./isolated-environment";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,22 +57,25 @@ export async function startPackagedWebDaemon(input: {
 }): Promise<PackagedWebDaemon> {
   const port = await availablePort();
   const home = await mkdtemp(path.join(tmpdir(), "paseo-relay-deployment-e2e-"));
+  const osHome = await mkdtemp(path.join(tmpdir(), "malleaf-packaged-web-os-home-"));
   const serverId = `relay-deployment-${Date.now().toString(36)}`;
-  const paseo = path.resolve(__dirname, "../../../../../node_modules/.bin/paseo");
+  const repo = await realpath(path.resolve(__dirname, "../../../../.."));
+  const paseo = await realpath(path.join(repo, "packages/cli/bin/paseo"));
+  if (!paseo.startsWith(repo + path.sep))
+    throw new Error("CLI fixture must use the repository entry");
   const env: NodeJS.ProcessEnv = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_"))),
-    HOME: home,
-    USERPROFILE: home,
+    ...isolatedDaemonEnvironment(osHome, home, {}, process.env.E2E_USE_HOST_HARNESS === "1"),
     CI: "true",
     NODE_ENV: "development",
-    PASEO_NODE_ENV: "development",
-    PASEO_SERVER_ID: serverId,
+    MALLEAF_NODE_ENV: "development",
+    MALLEAF_SERVER_ID: serverId,
   };
 
   try {
     await writeFile(
       path.join(home, "config.json"),
       JSON.stringify({
+        app: { baseUrl: "https://app.example.test" },
         daemon: {
           listen: `127.0.0.1:${port}`,
           relay: {
@@ -89,7 +93,7 @@ export async function startPackagedWebDaemon(input: {
         },
       }),
     );
-    await execFileAsync(paseo, ["daemon", "start", "--home", home], { env });
+    await execFileAsync(process.execPath, [paseo, "daemon", "start", "--home", home], { env });
     const origin = `http://127.0.0.1:${port}`;
     await waitForWebUi(origin, home);
 
@@ -100,8 +104,8 @@ export async function startPackagedWebDaemon(input: {
       serverId,
       pairingOfferUrl: async () => {
         const { stdout } = await execFileAsync(
-          paseo,
-          ["daemon", "pair", "--home", home, "--relay", "--json"],
+          process.execPath,
+          [paseo, "daemon", "pair", "--home", home, "--relay", "--json"],
           { env },
         );
         const result = JSON.parse(stdout) as { url?: unknown };
@@ -111,15 +115,19 @@ export async function startPackagedWebDaemon(input: {
         return result.url;
       },
       close: async () => {
-        await execFileAsync(paseo, ["daemon", "stop", "--home", home], { env }).catch(
-          () => undefined,
-        );
+        await execFileAsync(process.execPath, [paseo, "daemon", "stop", "--home", home], {
+          env,
+        }).catch(() => undefined);
         await rm(home, { recursive: true, force: true });
+        await rm(osHome, { recursive: true, force: true });
       },
     };
   } catch (error) {
-    await execFileAsync(paseo, ["daemon", "stop", "--home", home], { env }).catch(() => undefined);
+    await execFileAsync(process.execPath, [paseo, "daemon", "stop", "--home", home], { env }).catch(
+      () => undefined,
+    );
     await rm(home, { recursive: true, force: true });
+    await rm(osHome, { recursive: true, force: true });
     throw error;
   }
 }

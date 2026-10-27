@@ -73,9 +73,12 @@ async function runCli(args: string[], cwd: string): Promise<string> {
       cwd,
       env: {
         ...Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_")),
+          Object.entries(process.env).filter(
+            ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+          ),
         ),
-        PASEO_HOME: ctx.daemon.paseoHome,
+        MALLEAF_DAEMON_HOME: ctx.daemon.paseoHome,
+        MALLEAF_HOME: path.join(ctx.daemon.paseoHome, "cli-state"),
       },
       timeout: 20000,
     },

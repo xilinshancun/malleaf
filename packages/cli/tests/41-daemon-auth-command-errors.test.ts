@@ -12,7 +12,7 @@ const daemon = await startTestDaemon({
 
 async function lsError(password: string, remoteClient = false) {
   const result = await runLocalPaseo(["ls", "--json"], {
-    PASEO_HOME: remoteClient ? "" : daemon.paseoHome,
+    MALLEAF_DAEMON_HOME: remoteClient ? "" : daemon.paseoHome,
     PASEO_HOST: remoteClient ? `127.0.0.1:${daemon.port}` : "",
     PASEO_PASSWORD: password,
   });

@@ -1,7 +1,13 @@
+import {
+  MALLEAF_RUNTIME_CONTROL_KEYS,
+  isMalleafRuntimeControl,
+  MALLEAF_SESSION_CONTEXT_OPTIONS,
+} from "@getpaseo/protocol/malleaf/product-identity";
 const PASEO_NODE_ENV = "PASEO_NODE_ENV";
 const ELECTRON_RUN_AS_NODE = "ELECTRON_RUN_AS_NODE";
 
 const RUNTIME_CONTROL_ENV_KEYS = [
+  ...MALLEAF_RUNTIME_CONTROL_KEYS,
   PASEO_NODE_ENV,
   "PASEO_DESKTOP_MANAGED",
   "PASEO_SUPERVISED",
@@ -26,8 +32,11 @@ function buildExternalProcessEnv(
   for (const key of RUNTIME_CONTROL_ENV_KEYS) {
     delete sanitized[key];
   }
+  for (const name of MALLEAF_SESSION_CONTEXT_OPTIONS) {
+    sanitized[`MALLEAF_${name}`] = sanitized[`PASEO_${name}`];
+  }
   for (const [key, value] of Object.entries(sanitized)) {
-    if (value === undefined) {
+    if (value === undefined || isMalleafRuntimeControl(key)) {
       delete sanitized[key];
     }
   }
@@ -65,7 +74,7 @@ export function buildSelfNodeCommand(
   const env = buildExternalProcessEnv(process.env, []);
   Object.assign(env, { [ELECTRON_RUN_AS_NODE]: "1" }, envOverlay);
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) {
+    if (value === undefined || isMalleafRuntimeControl(key)) {
       delete env[key];
     }
   }

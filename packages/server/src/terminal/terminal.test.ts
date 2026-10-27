@@ -10,6 +10,7 @@ import {
   humanizeProcessTitle,
   normalizeProcessTitle,
   resolveZshShellIntegrationDir,
+  resolvePaseoCliExecutablePath,
   type TerminalSession,
 } from "./terminal.js";
 import {
@@ -27,12 +28,23 @@ import { spawnSync } from "node:child_process";
 import * as pty from "node-pty";
 import xterm from "@xterm/headless";
 import { renderTerminalSnapshotToAnsi } from "@getpaseo/protocol/terminal-snapshot";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { setImmediate as waitForImmediate, setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 
 const hasZsh = existsSync("/bin/zsh");
+
+it("Malleaf terminals resolve the renamed repository CLI after a clean install", () => {
+  vi.stubEnv("PASEO_CLI", undefined);
+  try {
+    const executable = resolvePaseoCliExecutablePath();
+    expect(executable).not.toBeNull();
+    expect(basename(executable!)).toBe(process.platform === "win32" ? "malleaf.cmd" : "malleaf");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 
 type TerminalRow = ReturnType<TerminalSession["getState"]>["grid"][number];
 

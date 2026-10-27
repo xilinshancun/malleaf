@@ -1,3 +1,4 @@
+import { isMalleafRuntimeControl } from "@getpaseo/protocol/malleaf/product-identity";
 // Shell environment resolution adapted from VS Code
 // https://github.com/microsoft/vscode/blob/main/src/vs/platform/shell/node/shellEnv.ts
 // Licensed under the MIT License.
@@ -409,6 +410,7 @@ function resolveShellEnv({ deps, timeoutMs }: ResolveShellEnvInput): ResolvedShe
   delete shellEnv.PASEO_NODE_ENV;
   delete shellEnv.PASEO_DESKTOP_MANAGED;
   delete shellEnv.PASEO_SUPERVISED;
+  for (const key of Object.keys(shellEnv)) if (isMalleafRuntimeControl(key)) delete shellEnv[key];
 
   deps.logger.info("[login-shell-env] start", {
     shell,

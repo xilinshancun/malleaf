@@ -1,3 +1,4 @@
+import { malleafDaemonEndpoint } from "@getpaseo/protocol/malleaf/product-identity";
 import { readFile } from "node:fs/promises";
 import { PluginRegistriesSchema } from "@getpaseo/protocol/plugin-registry";
 import { existsSync, readFileSync } from "node:fs";
@@ -375,20 +376,21 @@ export type PersistedConfig = Omit<PersistedConfigSchemaOutput, "agents"> & {
   };
 };
 
+// RFC-0001: Product defaults are independent of upstream compatibility versions.
 const CONFIG_FILENAME = "config.json";
 const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
   version: 1,
   daemon: {
-    listen: "127.0.0.1:6767",
+    listen: malleafDaemonEndpoint,
     cors: {
-      allowedOrigins: ["https://app.paseo.sh"],
+      allowedOrigins: [`http://${malleafDaemonEndpoint}`],
     },
     relay: {
       enabled: false,
     },
   },
   app: {
-    baseUrl: "https://app.paseo.sh",
+    baseUrl: `http://${malleafDaemonEndpoint}`,
   },
 }) as PersistedConfig;
 

@@ -1,3 +1,4 @@
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Pressable, Text, View } from "react-native";
@@ -227,7 +228,7 @@ function AddHostModalContent({ visible, onClose, onCancel, onSaved }: AddHostMod
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [host, setHost] = useState("");
-  const [port, setPort] = useState("6767");
+  const [port, setPort] = useState(String(malleafIdentity.daemonPort));
   const [useTls, setUseTls] = useState(false);
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
@@ -485,7 +486,7 @@ function AddHostModalContent({ visible, onClose, onCancel, onSaved }: AddHostMod
             initialValue={port}
             resetKey={`direct-port-${inputResetKey}`}
             onChangeText={setPort}
-            placeholder="6767"
+            placeholder={String(malleafIdentity.daemonPort)}
             placeholderTextColor={theme.colors.foregroundMuted}
             style={styles.input}
             autoCapitalize="none"
@@ -576,7 +577,7 @@ function AddHostModalContent({ visible, onClose, onCancel, onSaved }: AddHostMod
             initialValue={advancedUri}
             resetKey={`direct-host-uri-${inputResetKey}`}
             onChangeText={handleChangeAdvancedUri}
-            placeholder="tcp://localhost:6767?ssl=true"
+            placeholder={`tcp://localhost:${malleafIdentity.daemonPort}?ssl=true`}
             placeholderTextColor={theme.colors.foregroundMuted}
             style={styles.input}
             autoCapitalize="none"

@@ -20,7 +20,11 @@ export interface E2EWorkerOptions {
 function resolveOptionalHome(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
-  return resolvePaseoHomePath(trimmed === "current" ? "~/.paseo" : trimmed);
+  if (trimmed === "current")
+    throw new Error(
+      "Malleaf E2E never imports installed application state. Supply an explicit fixture directory.",
+    );
+  return resolvePaseoHomePath(trimmed);
 }
 
 async function createFakeEditorBin(): Promise<string> {
@@ -43,7 +47,7 @@ async function createFakeEditorBin(): Promise<string> {
   const fakeEditorSource = `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
-const recordPath = process.env.PASEO_E2E_EDITOR_RECORD_PATH;
+const recordPath = process.env.E2E_EDITOR_RECORD_PATH;
 if (recordPath) {
   fs.appendFileSync(recordPath, JSON.stringify({
     command: path.basename(process.argv[1]),
@@ -195,7 +199,7 @@ export async function startE2EWorker(
       environment: {
         NODE_ENV: "development",
         PATH: `${fakeEditorBin}${path.delimiter}${process.env.PATH ?? ""}`,
-        PASEO_E2E_EDITOR_RECORD_PATH: editorRecordPath,
+        E2E_EDITOR_RECORD_PATH: editorRecordPath,
         ...options.environment,
       },
     });

@@ -94,6 +94,8 @@
           "error",
           {
             "allow": {
+              // Malleaf's synchronous home-selection API validates aliases before any caller writes state.
+              "server/malleaf/home.ts": ["lstatSync", "readlinkSync", "realpathSync"],
               // TODO: literal executableExists is a synchronous public capability; move its callers and Windows existence predicates to async together.
               "executable-resolution/executable-resolution.ts": ["existsSync"],
               // TODO: winget enumeration shares synchronous existence predicates with literal lookup; convert the executable-resolution boundary together.

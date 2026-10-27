@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { resolvePaseoHome } from "@getpaseo/server/daemon-control";
 import path from "node:path";
 import { z } from "zod";
 import { HubCommandError } from "./error.js";
@@ -136,12 +136,6 @@ export class PrivateHubCredentialStore implements HubCredentialStore {
   }
 }
 
-function resolvePaseoHome(env: Readonly<Record<string, string | undefined>>): string {
-  const configured = env.PASEO_HOME ?? "~/.paseo";
-  const expanded = configured === "~" ? homedir() : configured.replace(/^~\//u, `${homedir()}/`);
-  return path.resolve(expanded);
-}
-
 function chmodPrivate(target: string, mode: number): void {
   if (process.platform === "win32") return;
   try {
@@ -158,7 +152,7 @@ function isMissingFile(error: unknown): boolean {
 function invalidCredentialFile(): HubCommandError {
   return new HubCommandError(
     "HUB_CREDENTIALS_INVALID",
-    "Stored Hub login is invalid. Run `paseo hub login <origin>` to replace it.",
+    "Stored Hub login is invalid. Run `malleaf hub login <origin>` to replace it.",
   );
 }
 

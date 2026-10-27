@@ -3,7 +3,7 @@
 /**
  * Phase 2: Daemon Command Tests
  *
- * Tests daemon commands with an isolated PASEO_HOME.
+ * Tests daemon commands with an isolated MALLEAF_DAEMON_HOME.
  *
  * Tests:
  * - daemon --help shows subcommands
@@ -34,7 +34,7 @@ const paseoHome = await mkdtemp(join(tmpdir(), "paseo-test-home-"));
 const require = createRequire(import.meta.url);
 
 function daemonCommand(args: string[]) {
-  return runLocalPaseo(["daemon", ...args], { PASEO_HOME: paseoHome });
+  return runLocalPaseo(["daemon", ...args], { MALLEAF_DAEMON_HOME: paseoHome });
 }
 
 async function stopChildProcess(child: ChildProcess): Promise<void> {
@@ -177,7 +177,7 @@ try {
 
   {
     const result = await runLocalPaseo(["--host", "127.0.0.1:1", "daemon", "status", "--json"], {
-      PASEO_HOME: paseoHome,
+      MALLEAF_DAEMON_HOME: paseoHome,
     });
     assert.strictEqual(result.exitCode, 1, "an explicit endpoint must not report local status");
     assert.match(result.stderr, /127.0.0.1:1/);
@@ -214,6 +214,7 @@ try {
         : join(paseoHome, "status.sock");
     const configPath = join(paseoHome, "config.json");
     const config = JSON.parse(await readFile(configPath, "utf-8"));
+    config.app = { baseUrl: "https://app.example.test" };
     config.daemon = {
       ...config.daemon,
       listen,
@@ -230,11 +231,11 @@ try {
       cwd: join(import.meta.dirname, ".."),
       env: {
         ...process.env,
-        PASEO_HOME: paseoHome,
-        PASEO_LISTEN: listen,
-        PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
-        PASEO_DICTATION_ENABLED: "0",
-        PASEO_VOICE_MODE_ENABLED: "0",
+        MALLEAF_DAEMON_HOME: paseoHome,
+        MALLEAF_LISTEN: listen,
+        MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+        MALLEAF_DICTATION_ENABLED: "0",
+        MALLEAF_VOICE_MODE_ENABLED: "0",
         CI: "true",
       },
       stdio: "ignore",
@@ -291,7 +292,7 @@ try {
       const nestedReload = await daemonCommand(["reload", "--host", listen, "--json"]);
       assert.strictEqual(nestedReload.exitCode, 0, nestedReload.stderr);
       assert.deepStrictEqual(JSON.parse(nestedReload.stdout), {
-        restartCommand: `paseo daemon restart --host ${JSON.stringify(listen)}`,
+        restartCommand: `malleaf daemon restart --host ${JSON.stringify(listen)}`,
         appliedPaths: ["daemon.browserTools.enabled"],
         restartRequiredPaths: [],
         overrideControlledPaths: ["daemon.listen"],
@@ -300,11 +301,11 @@ try {
       reloadConfig.daemon.browserTools.enabled = false;
       await writeFile(configPath, `${JSON.stringify(reloadConfig, null, 2)}\n`, "utf-8");
       const aliasReload = await runLocalPaseo(["reload", "--host", listen, "--json"], {
-        PASEO_HOME: paseoHome,
+        MALLEAF_DAEMON_HOME: paseoHome,
       });
       assert.strictEqual(aliasReload.exitCode, 0, aliasReload.stderr);
       assert.deepStrictEqual(JSON.parse(aliasReload.stdout), {
-        restartCommand: `paseo daemon restart --host ${JSON.stringify(listen)}`,
+        restartCommand: `malleaf daemon restart --host ${JSON.stringify(listen)}`,
         appliedPaths: ["daemon.browserTools.enabled"],
         restartRequiredPaths: [],
         overrideControlledPaths: [],
@@ -313,7 +314,7 @@ try {
       const yamlReload = await daemonCommand(["reload", "--host", listen, "--format", "yaml"]);
       assert.strictEqual(yamlReload.exitCode, 0, yamlReload.stderr);
       assert.deepStrictEqual(YAML.parse(yamlReload.stdout), {
-        restartCommand: `paseo daemon restart --host ${JSON.stringify(listen)}`,
+        restartCommand: `malleaf daemon restart --host ${JSON.stringify(listen)}`,
         appliedPaths: [],
         restartRequiredPaths: [],
         overrideControlledPaths: [],
@@ -331,7 +332,7 @@ try {
         );
         const foreignPairing = await runLocalPaseo(
           ["daemon", "pair", "--home", foreignHome, "--json"],
-          { PASEO_HOME: foreignHome },
+          { MALLEAF_DAEMON_HOME: foreignHome },
         );
         assert.strictEqual(foreignPairing.exitCode, 1);
         assert.match(foreignPairing.stderr, /RELAY_DISABLED/);
@@ -350,6 +351,7 @@ try {
     console.log("Test 9: daemon pair --relay persists offline relay consent");
     const configPath = join(paseoHome, "config.json");
     const config = JSON.parse(await readFile(configPath, "utf-8"));
+    config.app = { baseUrl: "https://app.example.test" };
     config.daemon = {
       ...config.daemon,
       relay: { ...config.daemon?.relay, enabled: false },

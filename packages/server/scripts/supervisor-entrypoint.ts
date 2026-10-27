@@ -14,8 +14,10 @@ import { PRIVATE_FILE_MODE } from "../src/server/private-files.js";
 import { loadPersistedConfig } from "../src/server/persisted-config.js";
 import { runSupervisor } from "./supervisor.js";
 import { resolveSupervisorLogFile } from "./supervisor-log-config.js";
+import { recordMalleafRuntimeEntry } from "../src/server/malleaf/runtime-entry.js";
+import { initializeMalleafEnvironment } from "../src/server/malleaf/environment.js";
 
-process.title = "Paseo Supervisor";
+process.title = "Malleaf Supervisor";
 
 interface DaemonRunnerConfig {
   devMode: boolean;
@@ -43,20 +45,14 @@ function parseConfig(argv: string[]): DaemonRunnerConfig {
 }
 
 function resolveWorkerEntry(): string {
-  const candidates = [
-    fileURLToPath(new URL("../server/server/daemon-worker.js", import.meta.url)),
-    fileURLToPath(new URL("../dist/server/server/daemon-worker.js", import.meta.url)),
-    fileURLToPath(new URL("../src/server/daemon-worker.ts", import.meta.url)),
-    fileURLToPath(new URL("../../src/server/daemon-worker.ts", import.meta.url)),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return candidates[0];
+  // RFC-0001: Source launches run source; immutable builds run their own dist.
+  // A missing entry is an invalid build, never a reason to reuse older output.
+  const relative = fileURLToPath(import.meta.url).endsWith(".ts")
+    ? "../src/server/daemon-worker.ts"
+    : "../server/server/daemon-worker.js";
+  const candidate = fileURLToPath(new URL(relative, import.meta.url));
+  if (!existsSync(candidate)) throw new Error(`Malleaf worker entry missing: ${candidate}`);
+  return candidate;
 }
 
 function resolveDevWorkerEntry(): string {
@@ -98,6 +94,7 @@ function resolvePackagedNodeEntrypointRunnerPath(currentScriptPath: string): str
 }
 
 async function main(): Promise<void> {
+  initializeMalleafEnvironment();
   const config = parseConfig(process.argv.slice(2));
   const workerEntry = config.devMode ? resolveDevWorkerEntry() : resolveWorkerEntry();
   const workerExecArgv = resolveWorkerExecArgv(workerEntry, config.devMode);
@@ -145,6 +142,7 @@ async function main(): Promise<void> {
     });
   };
 
+  await recordMalleafRuntimeEntry(paseoHome, fileURLToPath(import.meta.url), workerEntry);
   const supervisor = runSupervisor({
     name: "DaemonRunner",
     startupMessage: "Starting daemon worker (IPC restart and crash restart enabled)",

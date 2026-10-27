@@ -1,3 +1,4 @@
+import { malleafIdentity } from "./malleaf/product-identity.js";
 export interface AgentDeepLinkTarget {
   serverId: string;
   agentId: string;
@@ -24,7 +25,7 @@ export function buildAgentDeepLinkRoute(
 }
 
 export function buildAgentDeepLink(target: AgentDeepLinkTarget): string {
-  return `paseo:/${buildAgentDeepLinkRoute(target)}`;
+  return `${malleafIdentity.urlScheme}:/${buildAgentDeepLinkRoute(target)}`;
 }
 
 export function parseAgentDeepLink(input: string): AgentDeepLinkTarget | null {
@@ -36,7 +37,7 @@ export function parseAgentDeepLink(input: string): AgentDeepLinkTarget | null {
   }
 
   if (
-    url.protocol !== "paseo:" ||
+    url.protocol !== `${malleafIdentity.urlScheme}:` ||
     url.hostname !== "h" ||
     url.username ||
     url.password ||

@@ -1,3 +1,4 @@
+import { malleafDaemonEndpoint } from "@getpaseo/protocol/malleaf/product-identity";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import {
   createFinishSubscriptions,
@@ -160,7 +161,7 @@ import {
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
-import { createOrchestrationSkills } from "./orchestration-skills/index.js";
+import { createMalleafOrchestrationSkills } from "./malleaf/global-integrations.js";
 import {
   resolveReloadableConfig,
   type ResolvedDaemonSettings,
@@ -181,7 +182,6 @@ import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
-import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
@@ -557,7 +557,7 @@ function resolveExpressTrustProxySetting(config: PaseoDaemonConfig): true | stri
 
 function createInitialRelayConfig(config: ResolvedDaemonSettings): MutableDaemonConfig["relay"] {
   return {
-    enabled: config.relayEnabled ?? true,
+    enabled: config.relayEnabled ?? false,
     requireProtectedSecurity: config.relayRequireProtectedSecurity ?? false,
   };
 }
@@ -579,7 +579,7 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
     cors: { allowedOrigins: config.corsAllowedOrigins },
     trustedProxies: config.trustedProxies ?? ["loopback"],
     git: config.git ?? resolveGitProcessPolicy({ env: process.env }),
-    app: { baseUrl: config.appBaseUrl ?? "https://app.paseo.sh" },
+    app: { baseUrl: config.appBaseUrl ?? `http://${malleafDaemonEndpoint}` },
     ...(config.providerCatalogRefreshTimeoutMs !== undefined
       ? { catalogRefreshTimeoutMs: config.providerCatalogRefreshTimeoutMs }
       : {}),
@@ -589,7 +589,7 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
       providers: config.metadataGeneration?.providers ?? [],
     },
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
-    enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
+    enableTerminalAgentHooks: false,
     idleRuntimeCleanup: config.idleRuntimeCleanup !== false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
     pluginsEnabled: config.pluginsEnabled ?? false,
@@ -654,10 +654,7 @@ export async function createPaseoDaemon(
       },
     },
   });
-  const orchestrationSkills = createOrchestrationSkills(daemonConfigStore);
-  void orchestrationSkills.autoUpdate().catch((error) => {
-    logger.error({ err: error }, "Failed to maintain orchestration skills at startup");
-  });
+  const orchestrationSkills = createMalleafOrchestrationSkills();
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
   const pluginRuntime: PluginService = new PluginService(logger, daemonConfigStore, daemonVersion, {
@@ -712,7 +709,7 @@ export async function createPaseoDaemon(
   const terminalManager = createConfiguredTerminalManager({
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
   });
-  applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
+  // RFC-0001: Neither install nor uninstall Paseo-owned global harness hooks.
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
     ? config.serviceProxy.publicBaseUrl
@@ -724,7 +721,7 @@ export async function createPaseoDaemon(
   const scriptRuntimeStore = new WorkspaceScriptRuntimeStore();
   const workspaceSetupRuntime = new WorkspaceSetupRuntime();
   let configuredHostnames = config.hostnames ?? config.allowedHosts;
-  let appBaseUrl = config.appBaseUrl ?? "https://app.paseo.sh";
+  let appBaseUrl = config.appBaseUrl ?? `http://${malleafDaemonEndpoint}`;
   daemonConfigStore.onFieldChange("hostnames", (value) => {
     configuredHostnames = value as HostnamesConfig | undefined;
   });
@@ -1756,7 +1753,7 @@ export async function createPaseoDaemon(
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
             });
-            const relayEnabled = config.relayEnabled ?? true;
+            const relayEnabled = config.relayEnabled ?? false;
             const relayEndpoint = config.relayEndpoint ?? "relay.paseo.sh:443";
             const relayPublicEndpoint = config.relayPublicEndpoint ?? relayEndpoint;
             const relayUseTls = config.relayUseTls ?? relayEndpoint === "relay.paseo.sh:443";

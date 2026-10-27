@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../../paseo-env.js";
 import { mapCustomMessageToToolCall } from "../custom-message.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -2282,11 +2283,12 @@ export class OmpAgentClient implements AgentClient {
     if (!catalog && !config.mcpServers) {
       return;
     }
-    const bridge = await OmpMcpBridge.connect(config.mcpServers, config.cwd, this.logger, {
-      ...process.env,
-      ...this.runtimeSettings?.env,
-      ...launchEnv,
-    });
+    const bridge = await OmpMcpBridge.connect(
+      config.mcpServers,
+      config.cwd,
+      this.logger,
+      createExternalProcessEnv(process.env, this.runtimeSettings?.env ?? {}, launchEnv ?? {}),
+    );
     const router = new OmpHostToolRouter({ runtimeSession, catalog, bridge, logger: this.logger });
     try {
       await router.register();

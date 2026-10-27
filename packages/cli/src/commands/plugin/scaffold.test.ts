@@ -188,7 +188,7 @@ import { inspect } from "../shared/inspect";
 
 export async function inspectConfig(
   _input: RpcInput<typeof inspect>,
-  { paseo }: PluginHandlerContext,
+  { malleaf }: PluginHandlerContext,
 ) {
   return { configured: Boolean((await paseo.config.get()).config) };
 }
@@ -203,7 +203,7 @@ import { type PluginAgentPanelProps, type PluginClientContext, type PluginSurfac
 import { inspect } from "../shared/inspect";
 
 export function Surface({ navigation }: PluginSurfaceProps) {
-  const paseo = usePaseo();
+  const malleaf = usePaseo();
   const toast = useToast();
   const createWorkspace = () => paseo.workspaces.create({
     source: { kind: "directory", path: "/repo" },

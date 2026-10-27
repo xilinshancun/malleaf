@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "product": "Malleaf",
+  "version": "0.1.0",
+  "upstream": {
+    "repository": "https://github.com/getpaseo/paseo",
+    "commit": "de50243885ff47e0dc9c26233327fe066befa684",
+    "version": "0.14.0-beta.1"
+  }
+}

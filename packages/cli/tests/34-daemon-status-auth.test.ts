@@ -17,7 +17,7 @@ try {
   {
     console.log("Test 1: local status uses the daemon's local credential");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
       PASEO_HOST: "",
       PASEO_PASSWORD: "",
     });
@@ -36,7 +36,7 @@ try {
   {
     console.log("Test 2: status reports rejected supplied password separately");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
       PASEO_HOST: "",
       PASEO_PASSWORD: "wrong-secret",
     });
@@ -54,7 +54,7 @@ try {
   {
     console.log("Test 3: status reaches the same daemon when password is supplied");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
       PASEO_HOST: "",
       PASEO_PASSWORD: "shared-secret",
     });
@@ -74,7 +74,7 @@ try {
 
 // POSIX executable probing executes --version; Windows resolves executables differently.
 if (process.platform !== "win32") {
-  const root = await mkdtemp(join(tmpdir(), "paseo status slow provider "));
+  const root = await mkdtemp(join(tmpdir(), "malleaf status slow provider "));
   const home = join(root, "daemon");
   const workDir = join(root, "work");
   const provider = join(root, "slow-provider");

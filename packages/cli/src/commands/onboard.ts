@@ -120,13 +120,13 @@ function printNextSteps(pairingUrl: string | null, paseoHome: string, richUi: bo
     "2. Web app: https://app.paseo.sh",
     "3. Desktop app: https://github.com/getpaseo/paseo/releases/latest",
     "4. Docs: https://paseo.sh/docs",
-    `5. Example: paseo run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,
+    `5. Example: malleaf run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,
   ];
   const quickReferenceLines = [
-    "1. paseo --help",
-    `2. paseo ls --home ${JSON.stringify(paseoHome)}`,
-    `3. paseo run --home ${JSON.stringify(paseoHome)} "your prompt"`,
-    `4. paseo status --home ${JSON.stringify(paseoHome)}`,
+    "1. malleaf --help",
+    `2. malleaf ls --home ${JSON.stringify(paseoHome)}`,
+    `3. malleaf run --home ${JSON.stringify(paseoHome)} "your prompt"`,
+    `4. malleaf status --home ${JSON.stringify(paseoHome)}`,
     `5. Daemon logs: ${daemonLogPath}`,
   ];
 

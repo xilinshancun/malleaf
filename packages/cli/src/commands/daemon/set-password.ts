@@ -61,7 +61,7 @@ function terminalPasswordPrompt(): PromptPassword {
   if (!process.stdin.isTTY) {
     throw createCommandError(
       "PASSWORD_TTY_REQUIRED",
-      "paseo daemon set-password needs a terminal to read the password",
+      "malleaf daemon set-password needs a terminal to read the password",
       "Run it in an interactive terminal, or set PASEO_PASSWORD in the daemon's environment instead.",
     );
   }
@@ -92,7 +92,7 @@ export async function setDaemonPasswordInConfig(
   newPassword: string,
   options: SetPasswordOptions = {},
 ): Promise<SetPasswordResult> {
-  const paseoHome = resolvePaseoHome({ PASEO_HOME: options.home });
+  const paseoHome = resolvePaseoHome({ MALLEAF_DAEMON_HOME: options.home });
   const configPath = path.join(paseoHome, CONFIG_FILENAME);
   const persisted = readPersistedConfig(paseoHome);
   const nextConfig: PersistedConfig = {
@@ -111,8 +111,8 @@ export async function setDaemonPasswordInConfig(
   return {
     action: "password_set",
     configPath,
-    restartCommand: `paseo daemon restart --home ${JSON.stringify(paseoHome)}`,
-    message: `Password written to ${configPath}\nRestart the daemon for the change to take effect.\nRun: paseo daemon restart --home ${JSON.stringify(paseoHome)}`,
+    restartCommand: `malleaf daemon restart --home ${JSON.stringify(paseoHome)}`,
+    message: `Password written to ${configPath}\nRestart the daemon for the change to take effect.\nRun: malleaf daemon restart --home ${JSON.stringify(paseoHome)}`,
   };
 }
 
