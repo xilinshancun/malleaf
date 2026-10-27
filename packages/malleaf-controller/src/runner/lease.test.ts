@@ -137,6 +137,7 @@ test("kernel ownership excludes another process and is released after owner deat
   const child = spawn(
     process.execPath,
     [
+      "--conditions=source",
       "--import",
       loader,
       "--input-type=module",

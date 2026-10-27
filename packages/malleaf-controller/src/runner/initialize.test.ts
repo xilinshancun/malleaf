@@ -102,6 +102,7 @@ test("two processes elect one initial pair and retain both complete epochs", asy
       promisify(execFile)(
         process.execPath,
         [
+          "--conditions=source",
           "--import",
           loader,
           "--input-type=module",
