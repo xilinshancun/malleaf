@@ -4179,7 +4179,9 @@ export class DaemonClient {
       timeout: (input.deadlineMs ?? 60_000) + 5000,
       select: (msg) => {
         const parsed = DaemonQuiesceResponseSchema.safeParse(msg);
-        return parsed.success && parsed.data.requestId === requestId ? parsed.data.status : null;
+        return parsed.success && parsed.data.payload.requestId === requestId
+          ? parsed.data.payload.status
+          : null;
       },
     });
   }

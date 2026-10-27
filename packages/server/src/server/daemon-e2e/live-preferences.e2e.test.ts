@@ -3,8 +3,61 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import type { AgentSnapshotPayload, SessionOutboundMessage } from "../messages.js";
+import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
+import { DaemonClient } from "../test-utils/daemon-client.js";
+
+test("Malleaf quiesce replies reach a modern client and expiry restores admission", async () => {
+  const daemon = await createTestPaseoDaemon({ mcpEnabled: false });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    capabilities: { owned_subscriptions: true },
+    reconnect: { enabled: false },
+  });
+  try {
+    await client.connect();
+    expect(client.supportsMalleaf()).toBe(true);
+    expect(await client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).toMatchObject({
+      state: "accepting",
+      pendingAdmissions: 0,
+      pendingDeliveries: 0,
+    });
+    const drainId = randomUUID();
+    expect(
+      await client.quiesceDaemon({ action: "begin", drainId, deadlineMs: 10_000 }),
+    ).toMatchObject({
+      state: "draining",
+      drainId,
+      running: [],
+      pendingRegistrations: 0,
+      pendingScheduleRuns: 0,
+    });
+    await expect(client.createAgent({ provider: "codex", cwd: daemon.staticDir })).rejects.toThrow(
+      /draining/,
+    );
+    await expect(
+      client.quiesceDaemon({ action: "end", drainId: randomUUID(), deadlineMs: 1000 }),
+    ).rejects.toThrow(/drain_not_owned|another switch/);
+    expect((await client.quiesceDaemon({ action: "end", drainId, deadlineMs: 1000 })).state).toBe(
+      "accepting",
+    );
+    await client.quiesceDaemon({ action: "begin", drainId: randomUUID(), deadlineMs: 1000 });
+    await expect
+      .poll(
+        async () => (await client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).state,
+        { timeout: 5000 },
+      )
+      .toBe("accepting");
+    expect(await client.createAgent({ provider: "codex", cwd: daemon.staticDir })).toHaveProperty(
+      "id",
+    );
+  } finally {
+    await client.close();
+    await daemon.close();
+  }
+}, 20_000);
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));

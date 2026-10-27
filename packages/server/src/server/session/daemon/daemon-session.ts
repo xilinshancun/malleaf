@@ -337,7 +337,10 @@ export class DaemonSession {
             ? await quiesce.begin({ drainId: msg.drainId, deadlineMs: msg.deadlineMs ?? 60_000 })
             : await quiesce.end(msg.drainId);
       }
-      this.host.emit({ type: "daemon.quiesce.response", requestId: msg.requestId, status });
+      this.host.emit({
+        type: "daemon.quiesce.response",
+        payload: { requestId: msg.requestId, status },
+      });
     } catch (error) {
       this.host.emit({
         type: "rpc_error",

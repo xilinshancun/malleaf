@@ -15,6 +15,7 @@ import type { SessionOutboundMessage } from "../../messages.js";
 import type { DaemonConfigReloadResult } from "../../daemon-config-store.js";
 import { createQuiesceController } from "../../malleaf/quiesce.js";
 import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from "../../messages.js";
+import { SessionDelivery } from "../owned-subscriptions/index.js";
 
 const tempDirs: string[] = [];
 
@@ -110,12 +111,23 @@ describe("DaemonSession", () => {
       deadlineMs: 1000,
     };
     expect(SessionInboundMessageSchema.parse(begin)).toEqual(begin);
+    const source = {};
+    const delivered: SessionOutboundMessage[] = [];
+    const delivery = new SessionDelivery((socket, message) => {
+      expect(socket).toBe(source);
+      expect(delivery.permits(socket, message)).toBe(true);
+      delivered.push(message);
+    });
+    delivery.attach(source, true);
     try {
-      await subsystem.handleQuiesceRequest(begin);
+      await delivery.request(source, begin, async () => {
+        await subsystem.handleQuiesceRequest(begin);
+        expect(delivery.reply(emitted[0])).toBe(true);
+      });
+      expect(delivered).toEqual([emitted[0]]);
       expect(SessionOutboundMessageSchema.parse(emitted[0])).toMatchObject({
         type: "daemon.quiesce.response",
-        requestId: "begin",
-        status: { state: "draining", drainId: begin.drainId },
+        payload: { requestId: "begin", status: { state: "draining", drainId: begin.drainId } },
       });
       await subsystem.handleQuiesceRequest({
         ...begin,
@@ -130,10 +142,10 @@ describe("DaemonSession", () => {
       await subsystem.handleQuiesceRequest({ ...begin, requestId: "right-end", action: "end" });
       expect(emitted[2]).toMatchObject({
         type: "daemon.quiesce.response",
-        requestId: "right-end",
-        status: { state: "accepting" },
+        payload: { requestId: "right-end", status: { state: "accepting" } },
       });
     } finally {
+      await delivery.close();
       await quiesce.dispose();
     }
   });

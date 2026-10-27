@@ -27,6 +27,8 @@ export const DaemonQuiesceRequestSchema = z.object({
 export type DaemonQuiesceRequest = z.infer<typeof DaemonQuiesceRequestSchema>;
 export const DaemonQuiesceResponseSchema = z.object({
   type: z.literal("daemon.quiesce.response"),
-  requestId: z.string(),
-  status: MalleafQuiesceStatusSchema,
+  payload: z.object({
+    requestId: z.string(),
+    status: MalleafQuiesceStatusSchema,
+  }),
 });
