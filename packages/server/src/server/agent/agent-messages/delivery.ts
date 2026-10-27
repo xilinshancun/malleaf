@@ -36,12 +36,15 @@ interface DispatchRequest {
   onDispatch(disposition: PromptDispatchDisposition): void;
 }
 interface Dependencies {
+  /** Malleaf's single manager admission gate, checked before any queue mutation. */
+  assertAdmitting?: (recipientId: string) => void;
   dispatch(request: DispatchRequest): Promise<PromptDispatchDisposition>;
   onError(error: unknown, request: DispatchRequest): void;
   /** Return a cancellation function. Production uses the daemon's event loop. */
   schedule?: (delayMs: number, callback: () => void) => () => void;
 }
 export interface AgentMessageDelivery {
+  pendingCount(): number;
   enqueue(message: Message): Receipt;
   /** Queued messages and provider dispatches still owned by this recipient. */
   hasPending(recipientId: string): boolean;
@@ -140,9 +143,11 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
   }
 
   return {
+    pendingCount: () => pending.size + dispatching.size,
     hasPending: (recipientId) => pending.has(recipientId) || dispatching.has(recipientId),
     enqueue(message) {
       if (closed) throw new Error("Agent message delivery is closed");
+      dependencies.assertAdmitting?.(message.recipientId);
       let resolve!: Admitted["resolve"];
       let reject!: Admitted["reject"];
       const dispatched = new Promise<PromptDispatchDisposition>((accepted, failed) => {

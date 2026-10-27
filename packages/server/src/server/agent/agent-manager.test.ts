@@ -1,4 +1,5 @@
 import { createIdleRuntimeCleanup } from "./idle-runtime-cleanup/index.js";
+import { runAcceptedMalleafWork } from "../malleaf/admission.js";
 import {
   prepareAgentMessage,
   formatAgentMessage,
@@ -1707,6 +1708,132 @@ function fakeCodexEmitting(args: FakeCodexEmitterArgs): AgentClient {
 }
 
 const logger = createTestLogger();
+
+test("Malleaf drain completes accepted creation, refuses new work, and cannot undo shutdown", async () => {
+  const client = new HeldAgentCreationClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const config = { provider: "codex" as const, cwd: process.cwd() };
+  const creation = manager.createAgent(config, undefined, { workspaceId: undefined });
+  await client.waitForCreationToStart();
+  manager.beginDrain();
+  expect(manager.getDrainWork().pendingRegistrations).toBe(1);
+  await expect(manager.createAgent(config, undefined, { workspaceId: undefined })).rejects.toThrow(
+    "draining for a runtime switch",
+  );
+  client.finishCreating();
+  const agent = await creation;
+  expect(client.createdSessionClosed).toBe(false);
+  await expect
+    .poll(() => manager.getDrainWork())
+    .toEqual({
+      running: [],
+      pendingPermissions: [],
+      pendingRegistrations: 0,
+      pendingAdmissions: 0,
+    });
+  expect(() => manager.streamAgent(agent.id, "new work")).toThrow("draining for a runtime switch");
+  manager.endDrain();
+  await drainAsyncGenerator(manager.streamAgent(agent.id, "after cancellation"));
+  manager.prepareForShutdown();
+  manager.endDrain();
+  await expect(manager.createAgent(config, undefined, { workspaceId: undefined })).rejects.toThrow(
+    "shutting down",
+  );
+  expect(() => manager.streamAgent(agent.id, "after shutdown")).toThrow("shutting down");
+  await manager.closeAgent(agent.id);
+});
+
+test("Malleaf drain counts a reserved turn before provider start and includes internal work", async () => {
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  const agent = await manager.createAgent(
+    { provider: "codex", cwd: process.cwd(), internal: true },
+    undefined,
+    { workspaceId: undefined },
+  );
+  await expect.poll(() => manager.getDrainWork().running).toEqual([]);
+  const accepted = manager.streamAgent(agent.id, "accepted before draining");
+  manager.beginDrain();
+  expect(manager.getDrainWork().running).toEqual([agent.id]);
+  await drainAsyncGenerator(accepted);
+  await expect.poll(() => manager.getDrainWork().running).toEqual([]);
+  await expect(manager.waitForAgentEvent(agent.id)).resolves.toMatchObject({ status: "idle" });
+  await manager.closeAgent(agent.id);
+  await expect.poll(() => manager.getDrainWork().running).toEqual([]);
+});
+
+test("Malleaf drain lets an admitted delivery resume a closed recipient without opening general registration", async () => {
+  const client = new TestAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const agent = await manager.createAgent({ provider: "codex", cwd: process.cwd() }, undefined, {
+    workspaceId: undefined,
+  });
+  const handle = agent.persistence!;
+  await manager.closeAgent(agent.id);
+  manager.beginDrain();
+  await expect(manager.resumeAgentFromPersistence(handle, agent.config, agent.id)).rejects.toThrow(
+    "draining",
+  );
+  await runAcceptedMalleafWork(manager, agent.id, async () => {
+    await expect(
+      manager.createAgent({ provider: "codex", cwd: process.cwd() }, undefined, {
+        workspaceId: undefined,
+      }),
+    ).rejects.toThrow("draining");
+    await expect(
+      manager.resumeAgentFromPersistence(
+        handle,
+        agent.config,
+        "00000000-0000-4000-8000-000000000020",
+      ),
+    ).rejects.toThrow("draining");
+    await manager.resumeAgentFromPersistence(handle, agent.config, agent.id);
+    await drainAsyncGenerator(manager.streamAgent(agent.id, "already accepted report"));
+  });
+  await expect
+    .poll(() => manager.getDrainWork())
+    .toEqual({
+      running: [],
+      pendingPermissions: [],
+      pendingRegistrations: 0,
+      pendingAdmissions: 0,
+    });
+  expect(client.resumeOverrides).toHaveLength(1);
+  manager.prepareForShutdown();
+  await expect(
+    runAcceptedMalleafWork(manager, agent.id, () =>
+      manager.resumeAgentFromPersistence(handle, agent.config, agent.id),
+    ),
+  ).rejects.toThrow("shutting down");
+  await manager.closeAgent(agent.id);
+});
+
+test("Malleaf drain permits cancellation of an accepted continuation while refusing steering", async () => {
+  const turnId = "accepted-continuation";
+  const fixture = await createControlledInterruptFixture({
+    name: "drain-cancel-continuation",
+    agentId: "00000000-0000-4000-8000-000000000309",
+    turnId,
+    interrupt: async (session) => {
+      session.pushEvent({ type: "turn_completed", provider: session.provider, turnId });
+    },
+  });
+  try {
+    fixture.manager.beginDrain();
+    await runAcceptedMalleafWork(fixture.manager, fixture.agentId, () =>
+      fixture.startForegroundRun(),
+    );
+    expect(fixture.manager.getDrainWork().running).toEqual([fixture.agentId]);
+    await expect(fixture.manager.steerAgentRun(fixture.agentId, "new direction")).rejects.toThrow(
+      "draining",
+    );
+    await expect(fixture.manager.cancelAgentRun(fixture.agentId)).resolves.toEqual({
+      status: "settled",
+    });
+    await expect.poll(() => fixture.manager.getDrainWork().running).toEqual([]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
 
 test("does not register a session that finishes starting after shutdown begins", async () => {
   const client = new HeldAgentCreationClient();

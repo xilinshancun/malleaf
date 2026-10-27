@@ -1,4 +1,6 @@
 import type pino from "pino";
+import type { MalleafRuntimeIdentity } from "@getpaseo/protocol/malleaf/runtime-identity";
+import { QuiesceError, type QuiesceController } from "../../malleaf/quiesce.js";
 import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import { getPidLockInfo } from "../../pid-lock.js";
@@ -14,6 +16,8 @@ import type { HubRelationshipManagement } from "../../hub/relationship-controlle
 import type { DaemonConfigReloadResult } from "../../daemon-config-store.js";
 
 export interface DaemonRuntimeConfig {
+  malleafIdentity?: MalleafRuntimeIdentity;
+  quiesce?: QuiesceController;
   listen: string | null;
   worktreesRoot?: string;
   appBaseUrl?: string;
@@ -316,5 +320,34 @@ export class DaemonSession {
     msg: Extract<SessionInboundMessage, { type: "daemon.update.request" }>,
   ): Promise<void> {
     await this.selfUpdate.dispatch(msg);
+  }
+
+  async handleQuiesceRequest(
+    msg: Extract<SessionInboundMessage, { type: "daemon.quiesce.request" }>,
+  ): Promise<void> {
+    try {
+      const quiesce = this.daemonRuntimeConfig?.quiesce;
+      if (!quiesce) throw new Error("This daemon does not support Malleaf runtime switching");
+      let status;
+      if (msg.action === "status") status = await quiesce.status();
+      else {
+        if (!msg.drainId) throw new Error("A drainId is required for begin and end");
+        status =
+          msg.action === "begin"
+            ? await quiesce.begin({ drainId: msg.drainId, deadlineMs: msg.deadlineMs ?? 60_000 })
+            : await quiesce.end(msg.drainId);
+      }
+      this.host.emit({ type: "daemon.quiesce.response", requestId: msg.requestId, status });
+    } catch (error) {
+      this.host.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: error instanceof Error ? error.message : String(error),
+          code: error instanceof QuiesceError ? error.code : "quiesce_failed",
+        },
+      });
+    }
   }
 }

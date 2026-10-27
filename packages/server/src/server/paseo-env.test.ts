@@ -12,6 +12,7 @@ describe("paseo env contract", () => {
   const ELECTRON_RUN_AS_NODE = "ELECTRON_RUN_AS_NODE";
   const PASEO_NODE_ENV = "PASEO_NODE_ENV";
   const baseEnv = {
+    MALLEAF_SLOT_MANIFEST: "/parent-slot/malleaf.json",
     [ELECTRON_RUN_AS_NODE]: "1",
     ELECTRON_NO_ATTACH_CONSOLE: "1",
     NODE_ENV: "development",
@@ -29,6 +30,7 @@ describe("paseo env contract", () => {
     "PASEO_SUPERVISED",
     "ELECTRON_NO_ATTACH_CONSOLE",
     "ESBUILD_BINARY_PATH",
+    "MALLEAF_SLOT_MANIFEST",
   ] as const;
 
   test("builds internal daemon child env by preserving pass-through and control vars", () => {

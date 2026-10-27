@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentManager } from "../agent/agent-manager.js";
+import { assertMalleafAdmission } from "../malleaf/admission.js";
+import { createQuiesceController } from "../malleaf/quiesce.js";
 import { AgentStorage } from "../agent/agent-storage.js";
 import { createAgentCommand } from "../agent/create-agent/create.js";
 import type {
@@ -335,6 +337,103 @@ describe("ScheduleService", () => {
     // ENOTEMPTY races when AgentManager flushes a snapshot mid-cleanup.
     await agentStorage.flush();
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  test("Malleaf schedule pause waits for accepted ticks and resumes overdue work without restart recovery", async () => {
+    const runner = new OverlappingTickRunner();
+    const manager = new AgentManager({ logger: createTestLogger() });
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: manager,
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      runner: async (schedule) => {
+        const result = await runner.run(schedule);
+        assertMalleafAdmission(manager);
+        return result;
+      },
+    });
+    const quiesce = createQuiesceController({
+      agentManager: manager,
+      schedules: service,
+      pendingDeliveries: () => 0,
+      countResources: async () => ({ terminals: 0, scripts: 0 }),
+      onError: (error) => {
+        throw error;
+      },
+    });
+    const drainId = "00000000-0000-4000-8000-000000000001";
+    const first = await service.create({
+      prompt: "block the first tick",
+      cadence: { type: "every", everyMs: 60000 },
+      target: { type: "new-agent", config: { provider: "claude", cwd: tempDir } },
+    });
+    const ticking = service.tick();
+    await runner.firstRunStarted;
+    let paused = false;
+    const pausing = quiesce.begin({ drainId, deadlineMs: 5000 }).then(() => {
+      paused = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(paused).toBe(false);
+    expect(service.pendingRuns()).toBe(1);
+    expect(await quiesce.status()).toMatchObject({ state: "accepting", pendingScheduleRuns: 1 });
+    await expect(service.runOnce(first.id)).rejects.toThrow("paused");
+    await service.tick();
+    runner.unblockFirstRun();
+    await ticking;
+    await pausing;
+    expect(() => assertMalleafAdmission(manager)).toThrow("draining");
+    expect(await quiesce.status()).toMatchObject({ state: "draining", pendingScheduleRuns: 0 });
+    expect(service.pendingRuns()).toBe(0);
+    expect((await service.inspect(first.id)).runs.map((run) => run.status)).toEqual(["succeeded"]);
+    now = new Date("2026-01-01T00:02:00.000Z");
+    await service.tick();
+    expect((await service.inspect(first.id)).runs).toHaveLength(1);
+    await quiesce.end(drainId);
+    try {
+      await service.tick();
+      expect((await service.inspect(first.id)).runs.map((run) => run.status)).toEqual([
+        "succeeded",
+        "succeeded",
+      ]);
+    } finally {
+      await quiesce.dispose();
+      await service.stop();
+    }
+  });
+
+  test("Malleaf schedule pause timeout leaves an active run intact and permits later completion", async () => {
+    const runner = new OverlappingTickRunner();
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      runner: (schedule) => runner.run(schedule),
+    });
+    const first = await service.create({
+      prompt: "block the first tick",
+      cadence: { type: "every", everyMs: 60000 },
+      target: { type: "new-agent", config: { provider: "claude", cwd: tempDir } },
+    });
+    const ticking = service.tick();
+    await runner.firstRunStarted;
+    try {
+      await expect(service.stop({ drainTimeoutMs: 1 })).rejects.toThrow("Timed out");
+      service.resumeAfterDrain();
+      expect((await service.inspect(first.id)).runs.map((run) => run.status)).toEqual(["running"]);
+    } finally {
+      runner.unblockFirstRun();
+      await ticking;
+      await service.stop();
+    }
+    expect((await service.inspect(first.id)).runs.map((run) => run.status)).toEqual(["succeeded"]);
   });
 
   test("ticks due schedules and records run history on disk", async () => {

@@ -13,6 +13,8 @@ import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { HubRelationshipManagement } from "../../hub/relationship-controller.js";
 import type { SessionOutboundMessage } from "../../messages.js";
 import type { DaemonConfigReloadResult } from "../../daemon-config-store.js";
+import { createQuiesceController } from "../../malleaf/quiesce.js";
+import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from "../../messages.js";
 
 const tempDirs: string[] = [];
 
@@ -78,6 +80,75 @@ function makeSubsystem(overrides: {
 }
 
 describe("DaemonSession", () => {
+  test("Malleaf drain RPC returns correlated status and refuses cancellation by another switch", async () => {
+    const quiesce = createQuiesceController({
+      agentManager: {
+        beginDrain() {},
+        endDrain() {},
+        getDrainWork: () => ({
+          running: [],
+          pendingPermissions: [],
+          pendingRegistrations: 0,
+          pendingAdmissions: 0,
+        }),
+      },
+      schedules: { resumeAfterDrain() {}, async stop() {}, pendingRuns: () => 0 },
+      countResources: async () => ({ terminals: 0, scripts: 0 }),
+      pendingDeliveries: () => 0,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    const { subsystem, emitted } = makeSubsystem({
+      daemonRuntimeConfig: { listen: "127.0.0.1:1", getRelayConfig: () => null, quiesce },
+    });
+    const begin = {
+      type: "daemon.quiesce.request" as const,
+      requestId: "begin",
+      action: "begin" as const,
+      drainId: "00000000-0000-4000-8000-000000000001",
+      deadlineMs: 1000,
+    };
+    expect(SessionInboundMessageSchema.parse(begin)).toEqual(begin);
+    try {
+      await subsystem.handleQuiesceRequest(begin);
+      expect(SessionOutboundMessageSchema.parse(emitted[0])).toMatchObject({
+        type: "daemon.quiesce.response",
+        requestId: "begin",
+        status: { state: "draining", drainId: begin.drainId },
+      });
+      await subsystem.handleQuiesceRequest({
+        ...begin,
+        requestId: "wrong-end",
+        action: "end",
+        drainId: "00000000-0000-4000-8000-000000000002",
+      });
+      expect(emitted[1]).toMatchObject({
+        type: "rpc_error",
+        payload: { requestId: "wrong-end", code: "drain_not_owned" },
+      });
+      await subsystem.handleQuiesceRequest({ ...begin, requestId: "right-end", action: "end" });
+      expect(emitted[2]).toMatchObject({
+        type: "daemon.quiesce.response",
+        requestId: "right-end",
+        status: { state: "accepting" },
+      });
+    } finally {
+      await quiesce.dispose();
+    }
+  });
+
+  test("Malleaf drain RPC fails explicitly when the runtime lacks the capability", async () => {
+    const { subsystem, emitted } = makeSubsystem({});
+    await subsystem.handleQuiesceRequest({
+      type: "daemon.quiesce.request",
+      requestId: "unsupported",
+      action: "status",
+    });
+    expect(emitted).toMatchObject([
+      { type: "rpc_error", payload: { requestId: "unsupported", code: "quiesce_failed" } },
+    ]);
+  });
   test("config reload returns the daemon-owned classification", async () => {
     const { subsystem, emitted } = makeSubsystem({
       reloadConfig: async () => ({

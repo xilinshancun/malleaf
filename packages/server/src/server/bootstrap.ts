@@ -162,6 +162,8 @@ import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createMalleafOrchestrationSkills } from "./malleaf/global-integrations.js";
+import { readMalleafRuntimeIdentity } from "./malleaf/runtime-identity.js";
+import { createQuiesceController } from "./malleaf/quiesce.js";
 import {
   resolveReloadableConfig,
   type ResolvedDaemonSettings,
@@ -613,6 +615,10 @@ export async function createPaseoDaemon(
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
+  const malleafIdentity = await readMalleafRuntimeIdentity({
+    manifestPath: process.env.MALLEAF_SLOT_MANIFEST,
+    moduleUrl: import.meta.url,
+  });
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
   const obsoleteTimelineDirectory = path.join(config.paseoHome, "agent-timelines");
@@ -1425,6 +1431,24 @@ export async function createPaseoDaemon(
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
+  const quiesce = createQuiesceController({
+    agentManager,
+    schedules: scheduleService,
+    pendingDeliveries: () => wsServer?.agentMessages.pendingCount() ?? 0,
+    countResources: async () => {
+      const terminals = (
+        await Promise.all(
+          terminalManager.listDirectories().map((cwd) => terminalManager.getTerminals(cwd)),
+        )
+      ).flat();
+      const workspaces = new Set(terminals.map((terminal) => terminal.workspaceId));
+      const scripts = [...workspaces]
+        .flatMap((workspaceId) => scriptRuntimeStore.listForWorkspace(workspaceId))
+        .filter((script) => script.lifecycle === "running").length;
+      return { terminals: terminals.length, scripts };
+    },
+    onError: (error) => logger.error({ err: error }, "Failed to release Malleaf runtime drain"),
+  });
 
   agentManager.setAgentArchivedCallback(async (agentId) => {
     try {
@@ -1831,6 +1855,8 @@ export async function createPaseoDaemon(
               providerSnapshotManager,
               {
                 listen: formatListenTarget(boundListenTarget ?? listenTarget),
+                malleafIdentity,
+                quiesce,
                 worktreesRoot: config.worktreesRoot,
                 get appBaseUrl() {
                   return appBaseUrl;
@@ -1933,6 +1959,7 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
+    await quiesce.dispose();
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
     // Stop tracking plugin provider registrations before anything tears plugins

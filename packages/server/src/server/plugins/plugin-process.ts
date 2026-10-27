@@ -334,6 +334,9 @@ export function createPluginWorker(options: {
       console.error("Plugin cleanup failed", error);
     }
     await Promise.all([...providerConnections.keys()].map(closeProviderConnection));
+    // MALLEAF: complete accepted user settings writes before the runtime can exit
+    // and its stopped data epoch can be copied.
+    await settingsStore?.close();
     await releaseApi;
     await daemonClient?.close().catch(() => undefined);
     await sendAndWait({ type: "paseo_close" });

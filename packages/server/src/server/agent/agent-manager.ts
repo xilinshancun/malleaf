@@ -1,4 +1,10 @@
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
+import {
+  assertMalleafAdmission,
+  beginMalleafDrain,
+  endMalleafDrain,
+  pendingMalleafAdmissions,
+} from "../malleaf/admission.js";
 import type { AgentToolResult } from "@getpaseo/plugin/server";
 import type { RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
@@ -893,6 +899,44 @@ export class AgentManager {
     this.acceptingAgentRegistrations = false;
   }
 
+  beginDrain(): void {
+    if (!this.acceptingAgentRegistrations) return;
+    beginMalleafDrain(this);
+  }
+
+  endDrain(): void {
+    endMalleafDrain(this);
+  }
+
+  getDrainWork(): {
+    running: string[];
+    pendingPermissions: string[];
+    pendingRegistrations: number;
+    pendingAdmissions: number;
+  } {
+    const agents = Array.from(this.agents.values());
+    return {
+      running: agents
+        .filter(
+          (agent) =>
+            agent.lifecycle === "running" ||
+            agent.lifecycle === "initializing" ||
+            !this.agentHasNoPendingWork(agent) ||
+            this.lifecycleMutationTails.has(agent.id),
+        )
+        .map((agent) => agent.id),
+      pendingPermissions: agents
+        .filter(
+          (agent) =>
+            agent.pendingPermissions.size > 0 ||
+            (agent.attention.requiresAttention && agent.attention.attentionReason === "permission"),
+        )
+        .map((agent) => agent.id),
+      pendingRegistrations: this.agentRegistrationTasks.size,
+      pendingAdmissions: pendingMalleafAdmissions(this),
+    };
+  }
+
   setPaseoToolsEnabled(enabled: boolean): void {
     this.paseoToolsEnabled = enabled;
   }
@@ -1466,7 +1510,7 @@ export class AgentManager {
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
-    this.assertAcceptingAgentRegistrations();
+    this.assertAcceptingAgentRegistrations(agentId);
     const resolvedAgentId = validateAgentId(
       agentId ?? this.idFactory(),
       "resumeAgentFromPersistence",
@@ -1639,7 +1683,7 @@ export class AgentManager {
     overrides?: Partial<AgentSessionConfig>,
     options?: { rehydrateFromDisk?: boolean },
   ): Promise<ManagedAgent> {
-    this.assertAcceptingAgentRegistrations();
+    this.assertAcceptingAgentRegistrations(agentId);
     let existing = this.requireSessionAgent(agentId);
     if (this.hasInFlightRun(agentId)) {
       await this.cancelAgentRunBefore(agentId, "reload");
@@ -1696,14 +1740,14 @@ export class AgentManager {
       this.cancelRunningProviderSubagents(agentId);
       closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
       await this.persistSnapshot(closedExisting);
-      this.assertAcceptingAgentRegistrations();
+      this.assertNotShuttingDown();
 
       this.paseoToolPolicies.set(agentId, paseoToolPolicy);
       session = handle
         ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
         : await client.createSession(providerLaunchConfig, launchContext);
       await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
-      this.assertAcceptingAgentRegistrations();
+      this.assertNotShuttingDown();
 
       if (rehydrateFromDisk) {
         // Wipe the in-memory timeline so registerSession mints a new epoch and
@@ -1888,12 +1932,18 @@ export class AgentManager {
     return (
       agent.lifecycle === "idle" &&
       !agent.internal &&
+      (this.collectingRuntimes.has(agent.id) || !this.lifecycleMutationTails.has(agent.id)) &&
+      this.agentHasNoPendingWork(agent)
+    );
+  }
+
+  private agentHasNoPendingWork(agent: ManagedAgent): boolean {
+    return (
       agent.activeForegroundTurnId === null &&
       !this.runs.hasRun(agent.id) &&
       !agent.pendingReplacement &&
       agent.pendingPermissions.size === 0 &&
       agent.inFlightPermissionResponses.size === 0 &&
-      (this.collectingRuntimes.has(agent.id) || !this.lifecycleMutationTails.has(agent.id)) &&
       !this.foregroundMutationTails.has(agent.id) &&
       !this.sessionEventTails.has(agent.id) &&
       !this.providerSubagents.list(agent.id).some((child) => child.status === "running")
@@ -2772,6 +2822,7 @@ export class AgentManager {
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
+    this.assertAcceptingAgentRegistrations(agentId);
     if (this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && this.registry))
       return this.streamAfterRuntimeCollection(agentId, prompt, options);
     const existingAgent = this.requireSessionAgent(agentId);
@@ -2974,6 +3025,7 @@ export class AgentManager {
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): Promise<AsyncGenerator<AgentStreamEvent>> {
+    this.assertAcceptingAgentRegistrations(agentId);
     const snapshot = this.requireAgent(agentId);
     if (
       snapshot.lifecycle !== "running" &&
@@ -3006,6 +3058,7 @@ export class AgentManager {
     prompt: AgentPromptInput,
     options?: AgentSteerOptions,
   ): Promise<SteerResult> {
+    this.assertAcceptingAgentRegistrations(agentId);
     const agent = this.requireSessionAgent(agentId);
     const expectedTurnId = agent.activeForegroundTurnId ?? agent.activeTurnId;
     if (!expectedTurnId || !agent.session.steerActiveTurn) {
@@ -3034,6 +3087,7 @@ export class AgentManager {
     prompt: AgentPromptInput,
     options?: AgentSteerOptions,
   ): Promise<ActiveTurnSteerDispatchResult> {
+    this.assertAcceptingAgentRegistrations(agentId);
     const agent = this.requireSessionAgent(agentId);
     const expectedTurnId = agent.activeForegroundTurnId ?? agent.activeTurnId;
     if (!expectedTurnId) {
@@ -3443,6 +3497,7 @@ export class AgentManager {
   }
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {
+    this.assertAcceptingAgentRegistrations(agentId);
     const agent = this.requireSessionAgent(agentId);
     const submittedRow = this.timelineStore
       .getRows(agentId)
@@ -3461,6 +3516,7 @@ export class AgentManager {
       await this.cancelAgentRunBefore(agentId, "rewind");
     }
 
+    this.assertAcceptingAgentRegistrations(agentId);
     const lock = this.runs.createPendingRun(agentId);
     try {
       this.logger.info(
@@ -3767,7 +3823,7 @@ export class AgentManager {
   ): Promise<ManagedAgent> {
     let registered = false;
     try {
-      this.assertAcceptingAgentRegistrations();
+      this.assertNotShuttingDown();
       const resolvedAgentId = validateAgentId(agentId, "registerSession");
       if (this.agents.has(resolvedAgentId)) {
         throw new Error(`Agent with id ${resolvedAgentId} already exists`);
@@ -3803,7 +3859,7 @@ export class AgentManager {
         }
       }
 
-      this.assertAcceptingAgentRegistrations();
+      this.assertNotShuttingDown();
       this.agents.set(resolvedAgentId, managed);
       registered = true;
       // Initialize previousStatus to track transitions
@@ -3853,7 +3909,12 @@ export class AgentManager {
     }
   }
 
-  private assertAcceptingAgentRegistrations(): void {
+  private assertAcceptingAgentRegistrations(agentId?: string): void {
+    this.assertNotShuttingDown();
+    assertMalleafAdmission(this, agentId);
+  }
+
+  private assertNotShuttingDown(): void {
     if (!this.acceptingAgentRegistrations) {
       throw new AgentManagerShuttingDownError();
     }

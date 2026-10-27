@@ -35,6 +35,7 @@ function copySettingsState<Schema extends ZodType>(
 export class PluginSettingsStore {
   private readonly definitions = new Map<string, SettingsDefinition>();
   private queue: Promise<unknown> = Promise.resolve();
+  private closed = false;
 
   private readonly directory: string;
   private readonly changed: (id: string) => void;
@@ -84,9 +85,15 @@ export class PluginSettingsStore {
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error("Plugin settings store is closed"));
     const pending = this.queue.then(work);
     this.queue = pending.catch(() => undefined);
     return pending;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.queue;
   }
 
   private async stored(id: string) {

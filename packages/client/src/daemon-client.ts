@@ -5,6 +5,12 @@ import {
   type HostRouteFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
+import {
+  DaemonQuiesceRequestSchema,
+  DaemonQuiesceResponseSchema,
+  type DaemonQuiesceRequest,
+  type MalleafQuiesceStatus,
+} from "@getpaseo/protocol/malleaf/quiesce";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
 import { subscribeTimeline, type TimelineMessage } from "./timeline-subscription/index.js";
@@ -4147,6 +4153,33 @@ export class DaemonClient {
           return null;
         }
         return parsed.data.payload;
+      },
+    });
+  }
+
+  supportsMalleaf(): boolean {
+    return this.lastServerInfoMessage?.features?.malleaf === true;
+  }
+
+  async quiesceDaemon(
+    input: Omit<DaemonQuiesceRequest, "type" | "requestId">,
+  ): Promise<MalleafQuiesceStatus> {
+    if (!this.supportsMalleaf())
+      throw new Error("Update the host to a Malleaf version supporting runtime switching.");
+    const requestId = this.createRequestId();
+    const message = DaemonQuiesceRequestSchema.parse({
+      ...input,
+      type: "daemon.quiesce.request",
+      requestId,
+    });
+    return this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      timeout: (input.deadlineMs ?? 60_000) + 5000,
+      select: (msg) => {
+        const parsed = DaemonQuiesceResponseSchema.safeParse(msg);
+        return parsed.success && parsed.data.requestId === requestId ? parsed.data.status : null;
       },
     });
   }

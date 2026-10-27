@@ -1,4 +1,6 @@
 import { AgentMessageSchema } from "./agent-message.js";
+import { MalleafRuntimeIdentitySchema } from "./malleaf/runtime-identity.js";
+import { DaemonQuiesceRequestSchema, DaemonQuiesceResponseSchema } from "./malleaf/quiesce.js";
 import {
   HostsListRequestSchema,
   HostsAddRequestSchema,
@@ -3354,6 +3356,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ShutdownServerRequestMessageSchema,
   RestartServerRequestMessageSchema,
   DaemonUpdateRequestMessageSchema,
+  DaemonQuiesceRequestSchema,
   FetchAgentTimelineRequestMessageSchema,
   AgentTimelineSearchRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
@@ -3637,6 +3640,8 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    // COMPAT(malleafRuntime): added in Malleaf 0.1.0; keep optional for upstream hosts.
+    malleaf: MalleafRuntimeIdentitySchema.optional(),
     // Authenticated producer for host registration ownership, separate from admission authority.
     sourceId: z.string().optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
@@ -3647,6 +3652,8 @@ export const ServerInfoStatusPayloadSchema = z
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
     features: z
       .object({
+        // COMPAT(malleafQuiesce): added in Malleaf 0.1.0; keep optional for upstream hosts.
+        malleaf: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.
         agentRequestReceipts: z.boolean().optional(),
         // COMPAT(workspaceRequestReceipts): added in v0.8.0; remove gate after 2027-03-07.
@@ -7198,6 +7205,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   LoopStopResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
+  DaemonQuiesceResponseSchema,
 ]);
 
 export type SessionOutboundMessage = z.infer<typeof SessionOutboundMessageSchema>;

@@ -52,6 +52,40 @@ test("defaults, atomic saves, concurrent revisions, and restart persistence", as
   expect(changes).toEqual(["display"]);
 });
 
+test("shutdown waits for accepted settings writes and refuses later operations", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "plugin-settings-drain-"));
+  roots.push(directory);
+  let allowValidation!: () => void;
+  const validation = new Promise<void>((resolve) => {
+    allowValidation = resolve;
+  });
+  const store = new PluginSettingsStore(directory, () => {});
+  const handlers = store.register({
+    id: "durable",
+    scope: "host",
+    version: 1,
+    schema: z.object({ value: z.string() }).superRefine(async () => {
+      await validation;
+    }),
+  });
+  const write = handlers.write.handle({ revision: "missing", values: { value: "keep me" } });
+  let stopped = false;
+  const stopping = store.close().then(() => {
+    stopped = true;
+    return undefined;
+  });
+  await Promise.resolve();
+  expect(stopped).toBe(false);
+  await expect(handlers.read.handle()).rejects.toThrow("closed");
+  allowValidation();
+  await expect(write).resolves.toMatchObject({ status: "saved" });
+  await stopping;
+  expect(JSON.parse(await readFile(path.join(directory, "durable.json"), "utf8"))).toEqual({
+    version: 1,
+    values: { value: "keep me" },
+  });
+});
+
 test("server settings read current values and notify after successful writes", async () => {
   const { handlers } = await setup();
   const notifications: unknown[] = [];
