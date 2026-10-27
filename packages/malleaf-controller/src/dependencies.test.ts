@@ -3,7 +3,7 @@ import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 
-test.each(["./slot/materialize.ts", "./data/epoch.ts", "./runner/pointer.ts"])(
+test.each(["./slot/materialize.ts", "./data/epoch.ts", "./runner/pointer.ts", "./runner/lease.ts"])(
   "%s stays independent of the daemon implementation",
   async (entry) => {
     const result = await build({

@@ -15,6 +15,8 @@ export type StorageErrorCode =
   | "unsupported_schema"
   | "store_sealed"
   | "lease_lost"
+  | "lease_held"
+  | "port_occupied"
   | "invalid_state";
 
 export class StorageError extends Error {
