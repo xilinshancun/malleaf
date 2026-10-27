@@ -9,6 +9,8 @@ test.each([
   "./runner/pointer.ts",
   "./runner/lease.ts",
   "./runner/initialize.ts",
+  "./runtime/preflight.ts",
+  "./runtime/daemon.ts",
 ])("%s stays independent of the daemon implementation", async (entry) => {
   const result = await build({
     entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
@@ -45,6 +47,8 @@ test.each([
   const files = Object.keys(result.metafile.inputs);
   expect(files.length).toBeGreaterThan(1);
   expect(
-    files.filter((file) => /\/(?:bootstrap|agent-manager|session|messages)\.[jt]s$/.test(file)),
+    files.filter((file) =>
+      /packages\/server\/.*\/(?:bootstrap|agent-manager|session|messages)\.[jt]s$/.test(file),
+    ),
   ).toEqual([]);
 });

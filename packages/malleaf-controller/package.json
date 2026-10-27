@@ -11,6 +11,10 @@
     "./epoch": {
       "types": "./dist/data/epoch.d.ts",
       "default": "./dist/data/epoch.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/daemon.d.ts",
+      "default": "./dist/runtime/daemon.js"
     }
   },
   "scripts": {
@@ -19,6 +23,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@getpaseo/client": "*",
+    "@getpaseo/protocol": "*",
     "@getpaseo/server": "*",
     "zod": "^4.4.3"
   },
