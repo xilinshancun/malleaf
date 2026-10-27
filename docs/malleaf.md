@@ -20,4 +20,4 @@ Sharing should distinguish a single customization from a complete version. Contr
 
 Demonstrate a real backend or orchestration change as well as a visible interface change, build and test the candidate, verify that the running version changed, and recover the previous version after a failed candidate. A frontend-only reload does not satisfy this target.
 
-The repository currently contains the upstream source import and this brief. Architecture, implementation stages, and validation evidence will be recorded as they are completed. Read [upstream integration notes](../UPSTREAM.md) for the source baseline and existing CI limitation.
+Product identity and local isolation are implemented and undergoing cross-platform CI verification. Runtime artifact and data-epoch storage are being developed on a separate branch. Conversational customization, activation, rollback, and desktop slot loading are not yet delivered. The [RFCs](rfcs/README.md) record implementation stages and validation evidence; [upstream integration notes](../UPSTREAM.md) record the imported baseline.

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, expect } from "../support/fixtures";
 import {
@@ -31,6 +31,7 @@ import {
 import { expectOpenedProject } from "../support/helpers/project-picker-ui";
 import { connectSeedClient } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
+import { getIsolatedDaemonOsHome } from "../support/helpers/isolated-environment";
 
 const SECONDARY_HOST_ID = "add-project-flow-secondary";
 const SECONDARY_HOST_LABEL = "Secondary Host";
@@ -301,7 +302,9 @@ test.describe("Add Project command-center flow", () => {
   test("keyboard navigation keeps the selected row inside the visible results", async ({
     page,
   }) => {
-    const parentDirectory = await mkdtemp(path.join(homedir(), "paseo-e2e-scroll-"));
+    const parentDirectory = await mkdtemp(
+      path.join(getIsolatedDaemonOsHome(), "paseo-e2e-scroll-"),
+    );
     const rowPath = (index: number) =>
       path.join(parentDirectory, `scroll-probe-${String(index).padStart(2, "0")}`);
     let projectId: string | null = null;

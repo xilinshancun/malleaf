@@ -54,7 +54,7 @@ try {
     assert.strictEqual(result.configPath, join(paseoHome, "config.json"));
     assert.strictEqual(
       result.restartCommand,
-      `paseo daemon restart --home ${JSON.stringify(paseoHome)}`,
+      `malleaf daemon restart --home ${JSON.stringify(paseoHome)}`,
     );
     assert.strictEqual(config.daemon.listen, "127.0.0.1:9999");
     assert.strictEqual(config.daemon.relay.enabled, false);
@@ -126,7 +126,7 @@ try {
     };
     assert.strictEqual(error.code, "PASSWORD_TTY_REQUIRED");
     assert.match(error.message, /needs a terminal/);
-    assert.match(error.details, /PASEO_PASSWORD/);
+    assert.match(error.details, /MALLEAF_PASSWORD/);
     await assert.rejects(readFile(join(pipedHome, "config.json"), "utf-8"));
     console.log("✓ piped stdin reports that a terminal is required\n");
   }

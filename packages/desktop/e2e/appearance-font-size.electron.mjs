@@ -9,7 +9,7 @@ async function readFontSize(locator) {
 }
 
 export async function runAppearanceFontSizeRegression(page) {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator('[data-testid="sidebar-settings"]:visible').first().click();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
 
   await page.getByLabel("Theme: System", { exact: true }).click();

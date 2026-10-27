@@ -199,6 +199,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
     process.env.PASEO_PRIMARY_LAN_IP = "192.168.1.12";
 
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "paseo-offer-e2e-"));
+    const osHome = await mkdtemp(path.join(os.tmpdir(), "malleaf-offer-os-home-"));
     const port = await getAvailablePort();
 
     const serverRoot = path.resolve(import.meta.dirname, "../../..");
@@ -206,13 +207,22 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
     const tsxBin = path.resolve(serverRoot, "../../node_modules/.bin/tsx");
 
     const env = {
-      ...process.env,
-      PASEO_HOME: tempHome,
-      PASEO_LISTEN: `0.0.0.0:${port}`,
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+        ),
+      ),
+      HOME: osHome,
+      USERPROFILE: osHome,
+      CODEX_HOME: path.join(osHome, ".codex"),
+      CLAUDE_CONFIG_DIR: path.join(osHome, ".claude"),
+      MALLEAF_HOME: path.join(osHome, ".malleaf"),
+      MALLEAF_DAEMON_HOME: tempHome,
+      MALLEAF_LISTEN: `127.0.0.1:${port}`,
       OPENAI_API_KEY: "",
-      PASEO_DICTATION_ENABLED: "0",
-      PASEO_VOICE_MODE_ENABLED: "0",
-      PASEO_LOG_FORMAT: "json",
+      MALLEAF_DICTATION_ENABLED: "0",
+      MALLEAF_VOICE_MODE_ENABLED: "0",
+      MALLEAF_LOG_FORMAT: "json",
     };
 
     const stdoutLines: string[] = [];
@@ -235,7 +245,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line) as { msg?: string };
-              if (parsed.msg !== `Server listening on http://0.0.0.0:${port}`) continue;
+              if (parsed.msg !== `Server listening on http://127.0.0.1:${port}`) continue;
               clearTimeout(timeout);
               resolve(true);
               return;
@@ -264,7 +274,13 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
         cause: err,
       });
     } finally {
+      const exited = new Promise<void>((resolve) => {
+        if (proc.exitCode !== null || proc.signalCode !== null) resolve();
+        else proc.once("close", () => resolve());
+      });
       proc.kill();
+      await exited;
+      await rm(osHome, { recursive: true, force: true });
       await rm(tempHome, { recursive: true, force: true });
     }
   }, 30000);

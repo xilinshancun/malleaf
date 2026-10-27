@@ -20,4 +20,4 @@ Personal versions track Malleaf releases. The product's customization workflow w
 
 The imported upstream commit passed its quality, typecheck, application, server, desktop, and most browser CI jobs. Browser shard 8 reported 93 passed tests and an out-of-test `ENOTEMPTY` error while removing a worker's temporary directory. This is an unresolved upstream CI failure, not a fully green baseline. The upstream run is [40536405105](https://github.com/getpaseo/paseo/actions/runs/40536405105).
 
-Inherited GitHub Actions are disabled during repository bootstrap. Release identities, package publication, app update feeds, data homes, and CI destinations must be reviewed before enabling distribution. Upstream release scripts are not Malleaf release instructions.
+The repository enables the inherited CI workflow only. Publishing, deployment, packaging, and release workflows remain disabled. Release identities, package publication, app update feeds, data homes, and CI destinations must be reviewed before enabling distribution. Upstream release scripts are not Malleaf release instructions.

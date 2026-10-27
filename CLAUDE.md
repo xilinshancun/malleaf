@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This is Malleaf, an independently maintained derivative of Paseo. Read [docs/malleaf.md](docs/malleaf.md) for the product scope and [UPSTREAM.md](UPSTREAM.md) for integration constraints. The upstream architecture and development rules below still apply. Malleaf-specific implementation is under development.
+This is Malleaf, an independently maintained derivative of Paseo. Read [docs/malleaf.md](docs/malleaf.md) for the product scope, follow the [RFC workflow](docs/rfcs/README.md) for feature development, and read [UPSTREAM.md](UPSTREAM.md) for integration constraints. The upstream architecture and development rules below still apply. Malleaf-specific implementation is under development.
 
 Paseo is a mobile app for monitoring and controlling your local AI coding agents from anywhere. Your dev environment, in your pocket. Connects directly to your actual development environment — your code stays on your machine.
 
@@ -26,6 +26,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | Doc                                                                  | What's in it                                                                                                                   |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | [docs/malleaf.md](docs/malleaf.md)                                   | Malleaf product scope, personal versions, and first acceptance target                                                          |
+| [docs/rfcs/README.md](docs/rfcs/README.md)                           | Malleaf design review, task dependencies, implementation evidence, and code review                                             |
 | [docs/product.md](docs/product.md)                                   | What Paseo is, who it's for, where it's going                                                                                  |
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
@@ -111,7 +112,7 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.paseo` on port `6767`.
+Malleaf public launchers discard inherited `PASEO_*` settings. Development uses `~/.malleaf-dev/<checkout-path-hash>/daemon` and a checkout-specific loopback port; `npm run cli -- ...` selects that development home. Production uses `~/.malleaf/daemon` on port `6777`. Configure explicit overrides with `MALLEAF_*`; see [RFC-0001](docs/rfcs/0001-product-isolation.md). Never use the installed Paseo home for this checkout.
 
 When Mo requests an APK, use `npm run build:apk:arm64` for an ARM64 build: writes `artifacts/paseo-dogfood-arm64.apk` with diagnostics without starting a device; `npm run build:apk` builds all four Android architectures.
 

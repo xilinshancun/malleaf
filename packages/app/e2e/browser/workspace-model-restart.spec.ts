@@ -15,6 +15,7 @@ import {
   type NodeWebSocketFactory,
 } from "../support/helpers/node-ws-factory";
 import { withDisabledE2ESpeechEnv } from "../support/helpers/speech-env";
+import { isolatedDaemonEnvironment } from "../support/helpers/isolated-environment";
 import {
   expectNewWorkspaceProjectSelected,
   openGlobalNewWorkspaceComposer,
@@ -238,18 +239,19 @@ async function startRestartDaemon(input: {
   }
 
   const serverDir = path.resolve(__dirname, "../../../server");
+  const osHome = mkdtempSync(path.join(tmpdir(), "malleaf-restart-os-home-"));
   const child = spawnTsx("scripts/supervisor-entrypoint.ts", ["--dev"], {
     cwd: serverDir,
-    env: withDisabledE2ESpeechEnv({
-      ...process.env,
-      PASEO_HOME: input.paseoHome,
-      PASEO_SERVER_ID: SERVER_ID,
-      PASEO_LISTEN: `127.0.0.1:${port}`,
-      PASEO_CORS_ORIGINS: input.origin,
-      PASEO_RELAY_ENABLED: "0",
-      PASEO_NODE_ENV: "development",
-      NODE_ENV: "development",
-    }),
+    env: withDisabledE2ESpeechEnv(
+      isolatedDaemonEnvironment(osHome, input.paseoHome, {
+        MALLEAF_SERVER_ID: SERVER_ID,
+        MALLEAF_LISTEN: `127.0.0.1:${port}`,
+        MALLEAF_CORS_ORIGINS: input.origin,
+        MALLEAF_RELAY_ENABLED: "0",
+        MALLEAF_NODE_ENV: "development",
+        NODE_ENV: "development",
+      }),
+    ),
     stdio: ["ignore", "ignore", "pipe"],
     detached: false,
   });
@@ -263,6 +265,7 @@ async function startRestartDaemon(input: {
     await waitForServer(port, child);
   } catch (error) {
     await killProcessTree(child);
+    rmSync(osHome, { recursive: true, force: true });
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\nDaemon stderr:\n${stderr}`,
       { cause: error },
@@ -271,7 +274,10 @@ async function startRestartDaemon(input: {
 
   return {
     port,
-    close: () => killProcessTree(child),
+    close: async () => {
+      await killProcessTree(child);
+      rmSync(osHome, { recursive: true, force: true });
+    },
   };
 }
 
@@ -302,8 +308,8 @@ function loadAppVersion(): string {
 }
 
 async function seedBrowserForDaemon(page: Page, input: { serverId: string; port: number }) {
-  await page.route(/:(6767)\b/, (route) => route.abort());
-  await page.routeWebSocket(/:(6767)\b/, async (ws) => {
+  await page.route(/:(6767|6768|6777|6778)\b/, (route) => route.abort());
+  await page.routeWebSocket(/:(6767|6768|6777|6778)\b/, async (ws) => {
     await ws.close({ code: 1008, reason: "Blocked connection to localhost:6767 during e2e." });
   });
   await page.route(

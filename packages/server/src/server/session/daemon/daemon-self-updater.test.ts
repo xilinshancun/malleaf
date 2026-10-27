@@ -5,6 +5,7 @@ import { describe, expect, onTestFinished, test } from "vitest";
 import {
   DaemonSelfUpdateInProgressError,
   DaemonSelfUpdater,
+  daemonSelfUpdater,
   type DaemonSelfUpdateRuntime,
   type DaemonSelfUpdatePhase,
 } from "./daemon-self-updater.js";
@@ -25,6 +26,21 @@ type Inspection = NpmGlobalPaseoInstall | Error;
 type RuntimeCall = "inspect" | "installLatest";
 
 const globalRoot = "/global/lib";
+test("Malleaf production updater rejects upstream installation before emitting progress", async () => {
+  const progress: string[] = [];
+  const result = await daemonSelfUpdater.update({
+    daemonVersion: "0.14.0-beta.1",
+    desktopManaged: false,
+    onProgress: (phase) => progress.push(phase),
+    logger: createLogger(),
+  });
+  expect(result).toEqual({
+    success: false,
+    error: expect.stringContaining("Upstream npm self-update is disabled"),
+    newVersion: null,
+  });
+  expect(progress).toEqual([]);
+});
 const globalNodeModules = `${globalRoot}/node_modules`;
 const cliPackagePath = `${globalNodeModules}/@getpaseo/cli`;
 const npmServerPackageRoot = `${cliPackagePath}/node_modules/@getpaseo/server`;

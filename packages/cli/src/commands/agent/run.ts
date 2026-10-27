@@ -350,7 +350,7 @@ function validateRunWorkspaceOptions(options: AgentRunOptions): void {
     throw {
       code: "INVALID_OPTIONS",
       message: "Worktree options require --new-workspace worktree",
-      details: "Usage: paseo run --new-workspace worktree [worktree options] <prompt>",
+      details: "Usage: malleaf run --new-workspace worktree [worktree options] <prompt>",
     } satisfies CommandError;
   }
 
@@ -389,7 +389,7 @@ function validateRunOptions(prompt: string, options: AgentRunOptions, outputSche
     throw {
       code: "MISSING_PROMPT",
       message: "A prompt is required",
-      details: "Usage: paseo agent run [options] <prompt>",
+      details: "Usage: malleaf agent run [options] <prompt>",
     } satisfies CommandError;
   }
 
@@ -535,7 +535,7 @@ export async function resolveExistingRunWorkspace(
   } satisfies CommandError;
 }
 
-// Workspace policy for `paseo run`. Precedence:
+// Workspace policy for `malleaf run`. Precedence:
 //   1. --workspace <id>            -> run in that existing workspace
 //   2. caller agent                -> daemon resolves the caller's workspace
 //   3. $PASEO_WORKSPACE_ID         -> exported by workspace terminals
@@ -584,7 +584,7 @@ async function resolveRunWorkspace(
   console.error(`Created workspace ${result.workspace.id} - ${label}`);
   if (result.setupSkippedReason) console.error(result.setupSkippedReason);
   console.error(
-    "Tip: pass --workspace <id> (or set PASEO_WORKSPACE_ID) to run in an existing workspace.",
+    "Tip: pass --workspace <id> (or set MALLEAF_WORKSPACE_ID) to run in an existing workspace.",
   );
   return { id: result.workspace.id, cwd: result.workspace.workspaceDirectory ?? cwd };
 }
@@ -613,7 +613,7 @@ export async function runRunCommand(
         code: "INVALID_THINKING_OPTION",
         message: "--thinking cannot be empty",
         details:
-          'Provide a thinking option ID. Use "paseo provider models <provider> --thinking" to list valid IDs.',
+          'Provide a thinking option ID. Use "malleaf provider models <provider> --thinking" to list valid IDs.',
       };
       throw error;
     }

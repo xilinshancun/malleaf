@@ -252,7 +252,7 @@ export async function runLogsCommand(
 ): Promise<AgentLogsResult> {
   if (!id) {
     console.error("Error: Agent ID required");
-    console.error("Usage: paseo agent logs <id>");
+    console.error("Usage: malleaf agent logs <id>");
     process.exit(1);
   }
 
@@ -263,7 +263,7 @@ export async function runLogsCommand(
     const fetchResult = await client.fetchAgent({ agentId: id });
     if (!fetchResult) {
       console.error(`Error: No agent found matching: ${id}`);
-      console.error("Use `paseo ls` to list available agents");
+      console.error("Use `malleaf ls` to list available agents");
       await client.close();
       process.exit(1);
     }

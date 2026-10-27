@@ -109,4 +109,14 @@ export class DaemonSelfUpdater {
   }
 }
 
-export const daemonSelfUpdater = new DaemonSelfUpdater();
+// RFC-0001: A fork must never replace an installed upstream CLI via npm -g.
+export const daemonSelfUpdater: Pick<DaemonSelfUpdater, "update"> = {
+  async update() {
+    return {
+      success: false,
+      error:
+        "Malleaf updates are managed by personal versions. Upstream npm self-update is disabled.",
+      newVersion: null,
+    };
+  },
+};

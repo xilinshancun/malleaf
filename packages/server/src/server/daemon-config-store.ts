@@ -1,3 +1,4 @@
+import { assertRelayConfiguration } from "./malleaf/remote-app.js";
 import {
   loadPersistedConfig,
   savePersistedConfigAsync,
@@ -401,6 +402,11 @@ export class DaemonConfigStore {
   private async applySupportedPatch(
     parsedPatch: SupportedMutableConfigPatch,
   ): Promise<MutableDaemonConfig> {
+    if (parsedPatch.enableTerminalAgentHooks === true) {
+      throw new Error(
+        "Malleaf does not install global harness hooks. Per-session agent integration remains available.",
+      );
+    }
     if (parsedPatch.relay?.enabled !== undefined && !this.relayEnabledMutable) {
       throw new Error(
         "Relay is controlled by a daemon launch override. Remove PASEO_RELAY_ENABLED or the relay CLI flag before changing it here.",
@@ -423,6 +429,7 @@ export class DaemonConfigStore {
     );
 
     const configChanged = !isEqualValue(this.current, next);
+    assertRelayConfiguration(next);
 
     // A replaced API key leaves the speech view unchanged, so a speech patch always persists.
     if (!configChanged && removedProviders.length === 0 && speechPatch === undefined) {

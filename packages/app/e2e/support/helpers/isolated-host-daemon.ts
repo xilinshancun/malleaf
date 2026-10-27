@@ -1,22 +1,24 @@
 import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { withDisabledE2ESpeechEnv } from "./speech-env";
 import { killProcessTree, spawnTsx } from "./spawn-node";
+import { isolatedDaemonEnvironment } from "./isolated-environment";
 
 export interface IsolatedHostDaemon {
   serverId: string;
   port: number;
   paseoHome: string;
+  osHome: string;
   getPid(): number | undefined;
   restart(): Promise<void>;
   close(): Promise<void>;
 }
 
 export interface IsolatedHostDaemonOptions {
-  environment?: NodeJS.ProcessEnv;
+  environment?: Partial<NodeJS.ProcessEnv>;
   mutableRelay?: {
     enabled: boolean;
     endpoint?: string;
@@ -24,6 +26,7 @@ export interface IsolatedHostDaemonOptions {
   paseoHome?: string;
   preserveHome?: boolean;
   publishedVersion?: string;
+  useHostHarness?: boolean;
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -44,7 +47,7 @@ async function getAvailablePort(): Promise<number> {
 export async function getAvailableHostDaemonPort(): Promise<number> {
   const primaryPort = Number(process.env.E2E_DAEMON_PORT ?? 0);
   let port = await getAvailablePort();
-  while (port === 6767 || port === 6768 || port === primaryPort) port = await getAvailablePort();
+  while ([6767, 6768, 6777, 6778, primaryPort].includes(port)) port = await getAvailablePort();
   return port;
 }
 
@@ -88,6 +91,10 @@ export async function startIsolatedHostDaemon(
   serverId: string,
   options: IsolatedHostDaemonOptions = {},
 ): Promise<IsolatedHostDaemon> {
+  const useHostHarness = options.useHostHarness ?? process.env.E2E_USE_HOST_HARNESS === "1";
+  if (useHostHarness && options.publishedVersion) {
+    throw new Error("Published upstream fixtures cannot use the host harness directories.");
+  }
   const port = await getAvailableHostDaemonPort();
 
   const metroPort = process.env.E2E_METRO_PORT;
@@ -95,6 +102,8 @@ export async function startIsolatedHostDaemon(
 
   const paseoHome =
     options.paseoHome ?? (await mkdtemp(path.join(tmpdir(), "paseo-e2e-secondary-host-")));
+  const temporaryOsHome = await mkdtemp(path.join(tmpdir(), "malleaf-e2e-os-home-"));
+  const osHome = await realpath(temporaryOsHome);
   let publishedPackageRoot: string | null = null;
   if (options.publishedVersion) {
     publishedPackageRoot = await mkdtemp(path.join(tmpdir(), "paseo-e2e-published-server-"));
@@ -126,6 +135,7 @@ export async function startIsolatedHostDaemon(
         await rm(paseoHome, { recursive: true, force: true });
       }
       await rm(publishedPackageRoot, { recursive: true, force: true });
+      await rm(osHome, { recursive: true, force: true });
       throw error;
     }
   }
@@ -137,6 +147,7 @@ export async function startIsolatedHostDaemon(
       path.join(paseoHome, "config.json"),
       `${JSON.stringify({
         version: 1,
+        app: { baseUrl: "https://app.example.test" },
         daemon: {
           relay: {
             enabled: options.mutableRelay.enabled,
@@ -155,17 +166,22 @@ export async function startIsolatedHostDaemon(
   const spawnDaemon = async (): Promise<ChildProcess> => {
     const spawnOptions: SpawnOptions = {
       cwd: serverDir,
-      env: withDisabledE2ESpeechEnv({
-        ...process.env,
-        ...options.environment,
-        PASEO_HOME: paseoHome,
-        PASEO_SERVER_ID: serverId,
-        PASEO_LISTEN: `127.0.0.1:${port}`,
-        PASEO_CORS_ORIGINS: `http://localhost:${metroPort}`,
-        PASEO_RELAY_ENABLED: options.mutableRelay ? undefined : "0",
-        PASEO_NODE_ENV: "development",
-        NODE_ENV: "development",
-      }),
+      env: withDisabledE2ESpeechEnv(
+        isolatedDaemonEnvironment(
+          osHome,
+          paseoHome,
+          {
+            ...options.environment,
+            MALLEAF_SERVER_ID: serverId,
+            MALLEAF_LISTEN: `127.0.0.1:${port}`,
+            MALLEAF_CORS_ORIGINS: `http://localhost:${metroPort}`,
+            MALLEAF_RELAY_ENABLED: options.mutableRelay ? undefined : "0",
+            MALLEAF_NODE_ENV: "development",
+            NODE_ENV: "development",
+          },
+          useHostHarness,
+        ),
+      ),
       stdio: ["ignore", "ignore", "pipe"],
       detached: false,
     };
@@ -201,6 +217,7 @@ export async function startIsolatedHostDaemon(
     if (publishedPackageRoot) {
       await rm(publishedPackageRoot, { recursive: true, force: true });
     }
+    await rm(osHome, { recursive: true, force: true });
     throw error;
   }
   let closed = false;
@@ -209,6 +226,7 @@ export async function startIsolatedHostDaemon(
     serverId,
     port,
     paseoHome,
+    osHome,
     getPid: () => child.pid,
     restart: async () => {
       if (closed) throw new Error(`Cannot restart closed isolated daemon ${serverId}`);
@@ -225,6 +243,7 @@ export async function startIsolatedHostDaemon(
       if (publishedPackageRoot) {
         await rm(publishedPackageRoot, { recursive: true, force: true });
       }
+      await rm(osHome, { recursive: true, force: true });
     },
   };
 }

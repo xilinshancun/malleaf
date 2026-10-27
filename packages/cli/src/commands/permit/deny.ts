@@ -30,7 +30,7 @@ export function createDenyCommand(connect: PermitClientConnector = connectToDaem
       const error: CommandError = {
         code: "MISSING_ARGUMENT",
         message: "Request ID is required unless --all is specified",
-        details: "Usage: paseo permit deny <agent> <req_id> or paseo permit deny <agent> --all",
+        details: "Usage: malleaf permit deny <agent> <req_id> or malleaf permit deny <agent> --all",
       };
       throw error;
     }
@@ -44,7 +44,7 @@ export function createDenyCommand(connect: PermitClientConnector = connectToDaem
         const error: CommandError = {
           code: "AGENT_NOT_FOUND",
           message: `Agent not found: ${agentIdOrPrefix}`,
-          details: 'Use "paseo ls" to list available agents',
+          details: 'Use "malleaf ls" to list available agents',
         };
         throw error;
       }
@@ -97,7 +97,7 @@ export function createDenyCommand(connect: PermitClientConnector = connectToDaem
             const error: CommandError = {
               code: "PERMISSION_RESPONSE_UNCONFIRMED",
               message: `Permission response unconfirmed for request ${permission.id}: ${message}`,
-              details: 'Use "paseo permit ls" to check whether the request is still pending',
+              details: 'Use "malleaf permit ls" to check whether the request is still pending',
             };
             throw error;
           }

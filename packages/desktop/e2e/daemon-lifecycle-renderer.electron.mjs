@@ -61,18 +61,22 @@ export async function verifyAttachedDaemonControls({ repo, root, env, home, port
     // /status means Metro is listening; the app bundle may still need a cold compile.
     await warmMetro(metroPort);
     desktop = await electron.launch({
-      args: [path.join(repo, "packages/desktop/dist/main.js"), "--no-sandbox"],
+      args: [
+        path.join(repo, "packages/desktop/dist/main.js"),
+        "--no-sandbox",
+        `--user-data-dir=${path.join(root, "renderer-user-data")}`,
+      ],
       env: {
         ...env,
         EXPO_DEV_URL: `http://127.0.0.1:${metroPort}`,
-        PASEO_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-        PASEO_ELECTRON_USER_DATA_DIR: path.join(root, "renderer-user-data"),
+        MALLEAF_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+        MALLEAF_ELECTRON_USER_DATA_DIR: path.join(root, "renderer-user-data"),
       },
     });
     page = await desktop.firstWindow();
     page.on("pageerror", (error) => console.log("Renderer error:", error.message));
     await page.route(/:(6767|6768)\b/, (route) => route.abort());
-    await page.getByRole("button", { name: "Settings", exact: true }).click({ timeout: 90_000 });
+    await page.getByTestId("welcome-open-settings").click({ timeout: 90_000 });
     await page.getByRole("button", { name: "Enable built-in daemon", exact: true }).click();
     await expect(page.getByText("Attached to an existing daemon", { exact: true })).toBeVisible();
     await expect(

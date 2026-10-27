@@ -92,6 +92,29 @@ describe("passthrough CLI", () => {
     ).toBeNull();
   });
 
+  it.each([false, true])(
+    "keeps native profile switches in GUI mode (default app: %s)",
+    (isDefaultApp) => {
+      const executable = "/Applications/Malleaf.app/Contents/MacOS/Malleaf";
+      const argv = isDefaultApp ? [executable, "/checkout/dist/main.js"] : [executable];
+      argv.push(
+        "--user-data-dir=/tmp/private profile",
+        "--lang=en-US",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--remote-debugging-address=127.0.0.1",
+      );
+      expect(parsePassthroughCliArgs({ argv, isDefaultApp, forceCli: false })).toBeNull();
+      expect(
+        parsePassthroughCliArgs({
+          argv: [...argv, "daemon", "status"],
+          isDefaultApp,
+          forceCli: true,
+        }),
+      ).toEqual(["daemon", "status"]);
+    },
+  );
+
   it("preserves CLI flags for direct app invocations", () => {
     expect(
       parsePassthroughCliArgs({

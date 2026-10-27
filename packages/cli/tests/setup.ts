@@ -1,10 +1,12 @@
+import { CLI_BIN_PATH } from "./helpers/cli-path.js";
+import { testOsHome } from "./helpers/test-os-home.js";
 /**
  * Test setup utilities for Paseo CLI E2E tests
  *
  * Critical rules from design doc:
  * 1. Port: Random port via 10000 + Math.floor(Math.random() * 50000) - NEVER 6767
  * 2. Protocol: WebSocket ONLY - daemon has no HTTP endpoints
- * 3. Temp dirs: Create temp directories for PASEO_HOME and agent --cwd
+ * 3. Temp dirs: Create temp directories for MALLEAF_DAEMON_HOME and agent --cwd
  * 4. Model: Always --provider claude with haiku model for agent tests
  * 5. Cleanup: Kill daemon and remove temp dirs after each test
  */
@@ -15,18 +17,22 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const TEST_ENV_DEFAULTS = {
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
-  PASEO_DICTATION_ENABLED: process.env.PASEO_DICTATION_ENABLED ?? "0",
-  PASEO_VOICE_MODE_ENABLED: process.env.PASEO_VOICE_MODE_ENABLED ?? "0",
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
+  MALLEAF_DICTATION_ENABLED: process.env.MALLEAF_DICTATION_ENABLED ?? "0",
+  MALLEAF_VOICE_MODE_ENABLED: process.env.MALLEAF_VOICE_MODE_ENABLED ?? "0",
 };
 
 function testEnvironment(paseoHome: string): NodeJS.ProcessEnv {
   return {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_"))),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+      ),
+    ),
     ...TEST_ENV_DEFAULTS,
-    PASEO_HOME: paseoHome,
-    HOME: paseoHome,
-    USERPROFILE: paseoHome,
+    MALLEAF_DAEMON_HOME: paseoHome,
+    HOME: testOsHome,
+    USERPROFILE: testOsHome,
   };
 }
 
@@ -60,13 +66,13 @@ function killPidTree(pid: number, signal: NodeJS.Signals): void {
 export interface TestContext {
   /** Random port for test daemon (never 6767) */
   port: number;
-  /** Temp directory for PASEO_HOME */
+  /** Temp directory for MALLEAF_DAEMON_HOME */
   paseoHome: string;
   /** Temp directory for agent working directory */
   workDir: string;
   /** Running daemon process */
   daemon: ProcessPromise | null;
-  /** Run a paseo CLI command against the test daemon */
+  /** Run a malleaf CLI command against the test daemon */
   paseo: (args: string[]) => ProcessPromise;
   /** Clean up all resources */
   cleanup: () => Promise<void>;
@@ -91,13 +97,13 @@ export async function createTempDirs(): Promise<{ paseoHome: string; workDir: st
 
 /**
  * Wait for daemon to be ready by testing WebSocket connection
- * Uses `paseo agent ls` which connects via WebSocket
+ * Uses `${process.execPath} ${CLI_BIN_PATH} agent ls` which connects via WebSocket
  */
 async function probeDaemon(port: number, paseoHome: string): Promise<boolean> {
   try {
     const result = await $({
       env: testEnvironment(paseoHome),
-    })`paseo agent ls --host localhost:${port}`.nothrow();
+    })`${process.execPath} ${CLI_BIN_PATH} agent ls --host localhost:${port}`.nothrow();
     return result.exitCode === 0;
   } catch {
     return false;
@@ -129,11 +135,11 @@ export async function startDaemon(port: number, paseoHome: string): Promise<Proc
   const daemon = $({
     env: {
       ...testEnvironment(paseoHome),
-      PASEO_LISTEN: `127.0.0.1:${port}`,
-      PASEO_RELAY_ENABLED: "false",
+      MALLEAF_LISTEN: `127.0.0.1:${port}`,
+      MALLEAF_RELAY_ENABLED: "false",
       CI: "true",
     },
-  })`paseo daemon run`.nothrow();
+  })`${process.execPath} ${CLI_BIN_PATH} daemon run`.nothrow();
   return daemon;
 }
 
@@ -147,7 +153,9 @@ export async function createTestContext(): Promise<TestContext> {
   // Helper to run CLI commands against test daemon
   const paseo = (args: string[]): ProcessPromise => {
     $.verbose = false;
-    return $({ env: testEnvironment(paseoHome) })`paseo --home ${paseoHome} ${args}`.nothrow();
+    return $({
+      env: testEnvironment(paseoHome),
+    })`${process.execPath} ${CLI_BIN_PATH} --home ${paseoHome} ${args}`.nothrow();
   };
 
   // Cleanup function

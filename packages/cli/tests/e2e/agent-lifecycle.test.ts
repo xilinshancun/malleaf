@@ -8,12 +8,12 @@
  *
  * Test flow:
  * 1. Start daemon on random port
- * 2. Create agent with `paseo run "say hello" --provider claude`
- * 3. List agents with `paseo ls`
- * 4. Wait for agent with `paseo wait <id>`
- * 5. Inspect agent with `paseo inspect <id>`
- * 6. Stop agent with `paseo stop <id>` and verify it remains inspectable
- * 7. Delete agent with `paseo delete <id>`
+ * 2. Create agent with `malleaf run "say hello" --provider claude`
+ * 3. List agents with `malleaf ls`
+ * 4. Wait for agent with `malleaf wait <id>`
+ * 5. Inspect agent with `malleaf inspect <id>`
+ * 6. Stop agent with `malleaf stop <id>` and verify it remains inspectable
+ * 7. Delete agent with `malleaf delete <id>`
  * 8. Cleanup: stop daemon, remove temp dirs
  *
  * CRITICAL RULES:
@@ -45,7 +45,7 @@ async function setup(): Promise<void> {
   try {
     ctx = await createE2ETestContext({ timeout: 45000 });
     console.log(`Test daemon started on port ${ctx.port}`);
-    console.log(`PASEO_HOME: ${ctx.paseoHome}`);
+    console.log(`MALLEAF_DAEMON_HOME: ${ctx.paseoHome}`);
     console.log(`Work directory: ${ctx.workDir}`);
   } catch (err) {
     console.error("Failed to start test daemon:", err);

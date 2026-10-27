@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import type { SeedDaemonClient } from "./seed-client";
+import { getIsolatedDaemonOsHome } from "./isolated-environment";
 
 export interface ProjectPickerFixture {
   projectPath: string;
@@ -16,7 +16,7 @@ interface ProjectPickerFixtureResource {
 }
 
 export async function createProjectPickerFixture(): Promise<ProjectPickerFixtureResource> {
-  const root = await mkdtemp(path.join(homedir(), "paseo-e2e-project-picker-"));
+  const root = await mkdtemp(path.join(getIsolatedDaemonOsHome(), "paseo-e2e-project-picker-"));
   const nonce = randomUUID().replaceAll("-", "").slice(0, 8);
   const projectPath = path.join(root, "client", "team", `paseo-desktop-fuzzy-target-${nonce}`);
   await mkdir(projectPath, { recursive: true });

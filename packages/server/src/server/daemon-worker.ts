@@ -6,8 +6,12 @@ import { resolvePaseoHome } from "./paseo-home.js";
 import { createRootLogger } from "./logger.js";
 import type { DaemonLifecycleIntent } from "./bootstrap.js";
 import { getProcessDiagnostics } from "./process-diagnostics.js";
+import { initializeMalleafEnvironment } from "./malleaf/environment.js";
 
-process.title = "Paseo Daemon";
+// Direct worker launches are a public boundary too. Supervised workers retain
+// the supervisor's IPC control signals, which must not be cleared here.
+if (!process.send) initializeMalleafEnvironment();
+process.title = "Malleaf Daemon";
 
 type SupervisorLifecycleMessage =
   | {

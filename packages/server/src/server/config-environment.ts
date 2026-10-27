@@ -1,3 +1,5 @@
+import { MALLEAF_SESSION_CONTEXT_OPTIONS } from "@getpaseo/protocol/malleaf/product-identity";
+
 // Daemon configuration inputs. General provider credentials and executable/runtime
 // controls remain available to managed launches and their agent processes.
 export const DAEMON_SETTING_ENV_KEYS = [
@@ -80,12 +82,26 @@ export function daemonLaunchEnvironment(input: {
   desktopManaged?: boolean;
 }): NodeJS.ProcessEnv {
   const env = { ...input.env };
+  for (const name of MALLEAF_SESSION_CONTEXT_OPTIONS) {
+    delete env[`PASEO_${name}`];
+    delete env[`MALLEAF_${name}`];
+  }
+  env.MALLEAF_HOST_PASEO_HOME ??= env.PASEO_HOME === input.home ? "" : (env.PASEO_HOME ?? "");
   if (input.mode === "managed") {
-    for (const key of DAEMON_SETTING_ENV_KEYS) delete env[key];
+    for (const key of DAEMON_SETTING_ENV_KEYS) {
+      delete env[key];
+      if (key.startsWith("PASEO_")) delete env[`MALLEAF_${key.slice(6)}`];
+    }
   }
   delete env.PASEO_HOST;
+  delete env.MALLEAF_HOST;
   delete env.PASEO_DESKTOP_MANAGED;
+  delete env.MALLEAF_DESKTOP_MANAGED;
   env.PASEO_HOME = input.home;
-  if (input.desktopManaged) env.PASEO_DESKTOP_MANAGED = "1";
+  env.MALLEAF_DAEMON_HOME = input.home;
+  if (input.desktopManaged) {
+    env.PASEO_DESKTOP_MANAGED = "1";
+    env.MALLEAF_DESKTOP_MANAGED = "1";
+  }
   return env;
 }

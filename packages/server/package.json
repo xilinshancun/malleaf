@@ -13,6 +13,11 @@
   "type": "module",
   "types": "./dist/server/server/exports.d.ts",
   "exports": {
+    "./malleaf-runtime": {
+      "types": "./dist/server/server/malleaf/environment.d.ts",
+      "source": "./src/server/malleaf/environment.ts",
+      "default": "./dist/server/server/malleaf/environment.js"
+    },
     ".": {
       "types": "./dist/server/server/exports.d.ts",
       "source": "./src/server/exports.ts",

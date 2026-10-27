@@ -15,12 +15,13 @@ import { access } from "node:fs/promises";
 import { watch } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SkillSelection, SkillTargets } from "./operations";
 import type { SkillSelectionStore } from "./selection-store";
 import { createSkillsController, type SkillsController } from "./controller";
 import { beginSkillsTransaction } from "./transaction";
+import { createMalleafOrchestrationSkills } from "../../malleaf/global-integrations";
 
 interface Harness {
   root: string;
@@ -261,7 +262,35 @@ describe("skills controller", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(harness.root, { recursive: true, force: true });
+  });
+
+  it("Malleaf leaves installed harness skills and interrupted transactions untouched", async () => {
+    vi.spyOn(os, "homedir").mockReturnValue(path.join(harness.root, "home"));
+    const previous: SkillSelection = { mode: "all" };
+    const next: SkillSelection = { mode: "custom", skills: [] };
+    await harness.controller.install();
+    await writeUserFile(harness.targets, "paseo-loop", "notes/mine.md", "keep my skill");
+    await beginSkillsTransaction(harness.targets, previous, next, [
+      { kind: "delete", name: "paseo-loop" },
+    ]);
+    const before = await backupArtifacts(harness.targets);
+    const beforeFiles = await readUserFile(harness.targets, "paseo-loop", "notes/mine.md");
+    const beforeInstalled = await installedEverywhere(harness.targets);
+    const skills = createMalleafOrchestrationSkills();
+    expect((await skills.getStatus()).available).toEqual([]);
+    expect((await skills.autoUpdate()).installed).toEqual([]);
+    await expect(skills.reconcile()).rejects.toThrow("does not manage global Paseo skills");
+    await expect(skills.uninstall()).rejects.toThrow("does not manage global Paseo skills");
+    await expect(skills.saveSelection(next)).rejects.toThrow("does not manage global Paseo skills");
+    expect(await skills.importLegacySelectionIfUnset(previous)).toEqual({
+      imported: false,
+      selection: next,
+    });
+    expect(await backupArtifacts(harness.targets)).toEqual(before);
+    expect(await readUserFile(harness.targets, "paseo-loop", "notes/mine.md")).toEqual(beforeFiles);
+    expect(await installedEverywhere(harness.targets)).toEqual(beforeInstalled);
   });
 
   it("reports one snapshot with catalog, selection, status, and pending work", async () => {

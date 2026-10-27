@@ -1,3 +1,7 @@
+import {
+  MALLEAF_RUNTIME_CONTROL_KEYS,
+  isMalleafRuntimeControl,
+} from "@getpaseo/protocol/malleaf/product-identity";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync as nodeExistsSync, readdirSync as nodeReaddirSync } from "node:fs";
@@ -37,6 +41,7 @@ export interface EditorTargetRuntimeOptions {
 }
 
 const RUNTIME_CONTROL_ENV_KEYS = [
+  ...MALLEAF_RUNTIME_CONTROL_KEYS,
   "PASEO_NODE_ENV",
   "PASEO_DESKTOP_MANAGED",
   "PASEO_SUPERVISED",
@@ -50,7 +55,7 @@ function createExternalProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv
     delete env[key];
   }
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) {
+    if (value === undefined || isMalleafRuntimeControl(key)) {
       delete env[key];
     }
   }

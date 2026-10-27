@@ -4,21 +4,21 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { copyAttachmentFileToManagedStorage } from "./attachments";
 
-const originalPaseoHome = process.env.PASEO_HOME;
+const originalPaseoHome = process.env.MALLEAF_DAEMON_HOME;
 let testHome: string | null = null;
 
 async function useTempPaseoHome(): Promise<string> {
   testHome = await mkdtemp(path.join(os.tmpdir(), "paseo-desktop-attachments-"));
-  process.env.PASEO_HOME = testHome;
+  process.env.MALLEAF_DAEMON_HOME = testHome;
   return testHome;
 }
 
 describe("desktop attachment files", () => {
   afterEach(async () => {
     if (originalPaseoHome === undefined) {
-      delete process.env.PASEO_HOME;
+      delete process.env.MALLEAF_DAEMON_HOME;
     } else {
-      process.env.PASEO_HOME = originalPaseoHome;
+      process.env.MALLEAF_DAEMON_HOME = originalPaseoHome;
     }
 
     if (testHome) {

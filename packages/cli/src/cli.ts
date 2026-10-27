@@ -48,8 +48,8 @@ export function createCli(): Command {
   const program = new Command();
 
   program
-    .name("paseo")
-    .description("Paseo CLI - control your AI coding agents from the command line")
+    .name("malleaf")
+    .description("Malleaf CLI - control your local AI coding agents")
     .version(VERSION, "-v, --version", "output the version number")
     // Global output options
     .option("-o, --format <format>", "output format: table, json, yaml", "table")

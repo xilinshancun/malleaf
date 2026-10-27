@@ -96,7 +96,7 @@ async function verifyWorkspaceCallerContext() {
             : [entry.background ? "--background" : "--no-background"]),
           "--json",
         ],
-        { env: { PASEO_AGENT_ID: entry.caller } },
+        { env: { MALLEAF_AGENT_ID: entry.caller } },
       );
       assert.strictEqual(result.exitCode, 0, result.stderr);
       assert.strictEqual(

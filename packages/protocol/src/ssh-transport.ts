@@ -1,4 +1,5 @@
-export const DEFAULT_SSH_DAEMON_PORT = 6767;
+import { malleafIdentity } from "./malleaf/product-identity.js";
+export const DEFAULT_SSH_DAEMON_PORT = malleafIdentity.daemonPort;
 
 export interface SshTransportTarget {
   host: string;

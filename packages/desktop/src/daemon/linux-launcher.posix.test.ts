@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 
 // The launcher reads Linux /proc state as well as POSIX command interfaces.
 const it = test.runIf(process.platform === "linux");
@@ -29,10 +30,10 @@ async function launch(
     mkdirSync(app);
     mkdirSync(commands);
     writeFileSync(
-      join(app, "Paseo"),
+      join(app, malleafIdentity.name),
       `#!${process.execPath}\nconsole.log(JSON.stringify(process.argv.slice(2)));\n`,
     );
-    chmodSync(join(app, "Paseo"), 0o755);
+    chmodSync(join(app, malleafIdentity.name), 0o755);
     // The command interface represents the host's userns policy, independent of CI's host.
     writeFileSync(join(commands, "unshare"), `#!/bin/sh\nexit ${options.namespaces ? 0 : 1}\n`);
     chmodSync(join(commands, "unshare"), 0o755);
@@ -47,8 +48,8 @@ async function launch(
     chmodSync(join(app, "chrome-sandbox"), 0o755);
     await afterPack({ appOutDir: app, electronPlatformName: "linux", arch: 1 });
     if (options.rerun) await afterPack({ appOutDir: app, electronPlatformName: "linux", arch: 1 });
-    const executablePath = options.symlink ? join(root, "paseo") : join(app, "Paseo");
-    if (options.symlink) symlinkSync(join(app, "Paseo"), executablePath);
+    const executablePath = options.symlink ? join(root, "paseo") : join(app, malleafIdentity.name);
+    if (options.symlink) symlinkSync(join(app, malleafIdentity.name), executablePath);
     const args = options.args ?? ["path with spaces", "$(touch never)", "semi;colon", "*.txt"];
     const result = spawnSync(executablePath, args, {
       encoding: "utf8",
@@ -116,8 +117,8 @@ it("does not depend on APPIMAGE being present for an extracted portable app", as
 it("applies a debugging environment sandbox override before Chromium starts", async () => {
   const result = await launch({
     namespaces: true,
-    env: { PASEO_ELECTRON_FLAGS: "--disable-gpu\t--no-sandbox" },
+    env: { MALLEAF_ELECTRON_FLAGS: "--disable-gpu\t--no-sandbox" },
   });
   expect(result.args).toEqual(["--no-sandbox", ...result.input]);
-  expect(result.stderr).toContain("requested by PASEO_ELECTRON_FLAGS");
+  expect(result.stderr).toContain("requested by MALLEAF_ELECTRON_FLAGS");
 });

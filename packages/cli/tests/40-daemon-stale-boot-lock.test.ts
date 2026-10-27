@@ -18,10 +18,10 @@ console.log("=== Daemon lock left behind by a reboot ===\n");
 
 const paseoHome = await mkdtemp(join(tmpdir(), "paseo-stale-boot-lock-"));
 const env = {
-  PASEO_HOME: paseoHome,
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
-  PASEO_DICTATION_ENABLED: "0",
-  PASEO_VOICE_MODE_ENABLED: "0",
+  MALLEAF_DAEMON_HOME: paseoHome,
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+  MALLEAF_DICTATION_ENABLED: "0",
+  MALLEAF_VOICE_MODE_ENABLED: "0",
 };
 
 // Stands in for the process that inherits the supervisor's PID after a reboot. It records a

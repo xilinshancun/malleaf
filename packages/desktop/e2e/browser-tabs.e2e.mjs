@@ -1097,6 +1097,11 @@ async function main() {
   fs.mkdirSync(artifactDir, { recursive: true });
   const paseoHome = path.join(runtimeDir, "paseo-home");
   const userData = path.join(runtimeDir, "electron-user-data");
+  const osHome = path.join(runtimeDir, "os-home");
+  const codexHome = path.join(osHome, ".codex");
+  const claudeHome = path.join(osHome, ".claude");
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.mkdirSync(claudeHome, { recursive: true });
   const workspaceRoot = path.join(runtimeDir, "workspaces");
   fs.mkdirSync(paseoHome, { recursive: true });
 
@@ -1115,6 +1120,7 @@ async function main() {
   seedPaseoHome(remoteHome, `127.0.0.1:${remotePort}`, path.join(runtimeDir, "remote-workspaces"));
   const children = [];
   let browser = null;
+  let page = null;
   let client = null;
 
   try {
@@ -1125,28 +1131,43 @@ async function main() {
     fs.writeFileSync(externalOpenLog, "");
     fs.writeFileSync(
       path.join(openerDirectory, "xdg-open"),
-      '#!/bin/sh\nprintf "%s\\n" "$1" >> "$PASEO_TEST_EXTERNAL_OPEN_LOG"\n',
+      '#!/bin/sh\nprintf "%s\\n" "$1" >> "$E2E_EXTERNAL_OPEN_LOG"\n',
       { mode: 0o755 },
     );
     const commonEnv = {
-      ...process.env,
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+        ),
+      ),
+      HOME: osHome,
+      USERPROFILE: osHome,
+      CODEX_HOME: codexHome,
+      CLAUDE_CONFIG_DIR: claudeHome,
+      MALLEAF_HOME: path.join(osHome, ".malleaf"),
+      MALLEAF_TEST: "1",
       PATH: `${openerDirectory}${path.delimiter}${process.env.PATH}`,
-      PASEO_TEST_EXTERNAL_OPEN_LOG: externalOpenLog,
-      PASEO_HOME: paseoHome,
-      PASEO_LISTEN: listen,
-      PASEO_DAEMON_ENDPOINT: `localhost:${daemonPort}`,
-      PASEO_CORS_ORIGINS: "*",
-      PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
-      PASEO_DICTATION_ENABLED: "0",
-      PASEO_VOICE_MODE_ENABLED: "0",
+      E2E_EXTERNAL_OPEN_LOG: externalOpenLog,
+      MALLEAF_DAEMON_HOME: paseoHome,
+      MALLEAF_LISTEN: listen,
+      MALLEAF_DAEMON_ENDPOINT: `localhost:${daemonPort}`,
+      MALLEAF_CORS_ORIGINS: "*",
+      MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+      MALLEAF_DICTATION_ENABLED: "0",
+      MALLEAF_VOICE_MODE_ENABLED: "0",
       FORCE_COLOR: "0",
       NO_COLOR: "1",
     };
     const daemon = spawnLogged(
       "daemon",
       process.execPath,
-      ["--import", "tsx", path.join(rootDir, "packages/server/scripts/dev-runner.ts")],
-      { cwd: rootDir, env: { ...commonEnv, PASEO_NODE_ENV: "development" } },
+      [
+        "--import",
+        "tsx",
+        path.join(rootDir, "packages/server/scripts/supervisor-entrypoint.ts"),
+        "--dev",
+      ],
+      { cwd: rootDir, env: { ...commonEnv, MALLEAF_NODE_ENV: "development" } },
       artifactDir,
     );
     children.push(daemon.child);
@@ -1155,15 +1176,20 @@ async function main() {
     const remoteDaemon = spawnLogged(
       "remote-daemon",
       process.execPath,
-      ["--import", "tsx", path.join(rootDir, "packages/server/scripts/dev-runner.ts")],
+      [
+        "--import",
+        "tsx",
+        path.join(rootDir, "packages/server/scripts/supervisor-entrypoint.ts"),
+        "--dev",
+      ],
       {
         cwd: rootDir,
         env: {
           ...commonEnv,
-          PASEO_HOME: remoteHome,
-          PASEO_LISTEN: `127.0.0.1:${remotePort}`,
-          PASEO_SERVER_ID: "plugin-links-remote",
-          PASEO_NODE_ENV: "development",
+          MALLEAF_DAEMON_HOME: remoteHome,
+          MALLEAF_LISTEN: `127.0.0.1:${remotePort}`,
+          MALLEAF_SERVER_ID: "plugin-links-remote",
+          MALLEAF_NODE_ENV: "development",
         },
       },
       artifactDir,
@@ -1175,6 +1201,10 @@ async function main() {
       process.execPath,
       devRunner,
       `--inspect=127.0.0.1:${inspectorPort}`,
+      `--user-data-dir=${userData}`,
+      "--lang=en-US",
+      "--password-store=basic",
+      "--use-mock-keychain",
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ];
     const desktopCommand = process.platform === "linux" ? "xvfb-run" : desktopArgs.shift();
@@ -1193,9 +1223,9 @@ async function main() {
           EXPO_UNSTABLE_HEADLESS: "1",
           EXPO_PORT: String(expoPort),
           EXPO_DEV_URL: `http://localhost:${expoPort}`,
-          PASEO_ELECTRON_REMOTE_DEBUGGING_PORT: String(cdpPort),
-          PASEO_ELECTRON_USER_DATA_DIR: userData,
-          PASEO_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
+          MALLEAF_ELECTRON_REMOTE_DEBUGGING_PORT: String(cdpPort),
+          MALLEAF_ELECTRON_USER_DATA_DIR: userData,
+          MALLEAF_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
         },
       },
       artifactDir,
@@ -1204,7 +1234,7 @@ async function main() {
     await waitForPort(cdpPort, "Electron CDP", desktop);
 
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-    const page = await waitForAppPage(browser, expoPort);
+    page = await waitForAppPage(browser, expoPort);
     await hideDeveloperToasts(page);
     const status = await waitForDesktopStatus(page);
 
@@ -1270,6 +1300,12 @@ async function main() {
       `Browser desktop browser E2E passed: WebContents ${report.originalWebContentsId} remained ${report.finalWebContentsId}; viewport, inactive capture, focus continuity, list, snapshot, click, local-page selectors passed.`,
     );
   } catch (error) {
+    if (page && !page.isClosed()) {
+      await page.screenshot({ path: path.join(artifactDir, "failure.png") }).catch(() => undefined);
+      await fs.promises
+        .writeFile(path.join(artifactDir, "failure.html"), await page.content())
+        .catch(() => undefined);
+    }
     console.error(`Browser desktop browser E2E failed. Artifacts: ${artifactDir}`);
     console.error(error);
     throw error;

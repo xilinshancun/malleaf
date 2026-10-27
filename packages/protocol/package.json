@@ -9,6 +9,11 @@
   ],
   "type": "module",
   "exports": {
+    "./malleaf/product-identity": {
+      "types": "./dist/malleaf/product-identity.d.ts",
+      "source": "./src/malleaf/product-identity.ts",
+      "default": "./dist/malleaf/product-identity.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"

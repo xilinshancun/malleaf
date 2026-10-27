@@ -1,3 +1,4 @@
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 import {
   ArrowDown,
   ArrowUp,
@@ -299,7 +300,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <Text style={styles.emptyText}>{t("settings.host.agents.unavailable")}</Text>
         </View>
       )}
-      <AgentSkillsSection serverId={serverId} />
+      {malleafIdentity.globalHarnessIntegrations && <AgentSkillsSection serverId={serverId} />}
       <AgentProfilesSection serverId={serverId} />
     </View>
   );
@@ -1668,7 +1669,9 @@ export function HostTerminalsPage({ serverId }: { serverId: string }) {
   return (
     <View>
       <SettingsSection title="Terminal agents">
-        <EnableTerminalAgentHooksCard serverId={serverId} />
+        {malleafIdentity.globalHarnessIntegrations && (
+          <EnableTerminalAgentHooksCard serverId={serverId} />
+        )}
       </SettingsSection>
       <TerminalProfilesSection serverId={serverId} />
     </View>

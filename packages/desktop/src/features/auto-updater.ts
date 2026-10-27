@@ -224,7 +224,9 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
 
 const appUpdateService = createAppUpdateService({
   runtime: new ElectronAppUpdateRuntime(),
-  isPackaged: () => app.isPackaged,
+  // RFC-0001: Native updates remain disabled until Malleaf publishes its own
+  // signed bootstrap releases. Personal versions use the local controller.
+  isPackaged: () => false,
   now: () => Date.now(),
   bucket: async () => bucketFromStagingUserId(await getStagingUserId()),
   reportCheckError: (error) => {

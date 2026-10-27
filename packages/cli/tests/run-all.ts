@@ -5,7 +5,7 @@
  *
  * Runs all test phases as separate subprocesses with a bounded worker pool
  * so independent tests run concurrently. Each test file already isolates
- * its own daemon (ephemeral port + tmp PASEO_HOME), so parallelism is safe.
+ * its own daemon (ephemeral port + tmp MALLEAF_DAEMON_HOME), so parallelism is safe.
  */
 
 import { spawn } from "child_process";
@@ -19,13 +19,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..", "..");
 
 // npm workspace scripts only add the local node_modules/.bin to PATH; hoisted
-// packages live in the root. Prepend it so `npx paseo` resolves locally.
+// packages live in the root. Prepend it for repository tool dependencies; CLI tests use an explicit entry.
 const rootNodeModulesBin = join(repoRoot, "node_modules", ".bin");
 const args = process.argv.slice(2);
 const testEnvDefaults = {
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
-  PASEO_DICTATION_ENABLED: process.env.PASEO_DICTATION_ENABLED ?? "0",
-  PASEO_VOICE_MODE_ENABLED: process.env.PASEO_VOICE_MODE_ENABLED ?? "0",
+  MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
+  MALLEAF_DICTATION_ENABLED: process.env.MALLEAF_DICTATION_ENABLED ?? "0",
+  MALLEAF_VOICE_MODE_ENABLED: process.env.MALLEAF_VOICE_MODE_ENABLED ?? "0",
 };
 
 const DEFAULT_CONCURRENCY = 4;
@@ -203,15 +203,17 @@ async function runSingleTest(testFile: string): Promise<TestOutcome> {
       const proc = spawn("npx", ["tsx", testPath], {
         env: {
           ...Object.fromEntries(
-            Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_")),
+            Object.entries(process.env).filter(
+              ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+            ),
           ),
           HOME: osHome,
           USERPROFILE: osHome,
           PATH: [rootNodeModulesBin, process.env.PATH].filter(Boolean).join(delimiter),
           npm_config_cache: npmCache,
-          PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: testEnvDefaults.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD,
-          PASEO_DICTATION_ENABLED: testEnvDefaults.PASEO_DICTATION_ENABLED,
-          PASEO_VOICE_MODE_ENABLED: testEnvDefaults.PASEO_VOICE_MODE_ENABLED,
+          MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD: testEnvDefaults.MALLEAF_LOCAL_SPEECH_AUTO_DOWNLOAD,
+          MALLEAF_DICTATION_ENABLED: testEnvDefaults.MALLEAF_DICTATION_ENABLED,
+          MALLEAF_VOICE_MODE_ENABLED: testEnvDefaults.MALLEAF_VOICE_MODE_ENABLED,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });

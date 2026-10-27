@@ -147,14 +147,14 @@ export async function createOpenCodeOmoRealRuntime(): Promise<OpenCodeOmoRealRun
     });
   }
 
-  const previousPaseoHome = process.env.PASEO_HOME;
+  const previousDaemonHome = process.env.MALLEAF_DAEMON_HOME;
   let traceDestination: ReturnType<typeof pino.destination> | null = null;
   let closeTrace: (() => void) | null = null;
   let serverManager: OpenCodeServerManager | null = null;
   let daemon: TestPaseoDaemon | null = null;
   let client: DaemonClient | null = null;
   try {
-    process.env.PASEO_HOME = path.join(paths.paseoHomeRoot, ".paseo");
+    process.env.MALLEAF_DAEMON_HOME = path.join(paths.paseoHomeRoot, ".paseo");
     traceDestination = pino.destination({
       dest: path.join(paths.artifacts, "daemon.log"),
       sync: true,
@@ -205,7 +205,7 @@ export async function createOpenCodeOmoRealRuntime(): Promise<OpenCodeOmoRealRun
             rmSync(paths.root, { recursive: true, force: true });
           }
         } finally {
-          restoreEnvironment("PASEO_HOME", previousPaseoHome);
+          restoreEnvironment("MALLEAF_DAEMON_HOME", previousDaemonHome);
         }
       },
     };
@@ -220,7 +220,7 @@ export async function createOpenCodeOmoRealRuntime(): Promise<OpenCodeOmoRealRun
         traceDestination?.end();
       }
     } finally {
-      restoreEnvironment("PASEO_HOME", previousPaseoHome);
+      restoreEnvironment("MALLEAF_DAEMON_HOME", previousDaemonHome);
     }
     throw withArtifactLocation(error, paths.artifacts);
   }
@@ -273,7 +273,7 @@ function buildRuntimeEnv(paths: RuntimePaths, openRouterApiKey: string | null): 
     SSL_CERT_DIR: process.env.SSL_CERT_DIR,
     HOME: paths.home,
     ...(process.platform === "win32" ? resolveWindowsHomeEnv(paths.home, paths.temporary) : {}),
-    PASEO_HOME: path.join(paths.paseoHomeRoot, ".paseo"),
+    MALLEAF_DAEMON_HOME: path.join(paths.paseoHomeRoot, ".paseo"),
     XDG_CONFIG_HOME: paths.xdgConfig,
     XDG_DATA_HOME: paths.xdgData,
     XDG_CACHE_HOME: paths.xdgCache,

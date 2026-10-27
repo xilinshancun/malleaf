@@ -1,4 +1,6 @@
-import { access } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { expect, test as base } from "../support/fixtures";
 import {
   answerNextRemovalWarning,
@@ -16,6 +18,43 @@ import {
   type AgentSkillsSandbox,
 } from "../support/helpers/agent-skills";
 import { readVerticalGap, waitForSettledPosition } from "../support/helpers/sheet-layout";
+import { gotoAppShell, openSettings } from "../support/helpers/app";
+import { openHostSection } from "../support/helpers/settings";
+import { getServerId } from "../support/helpers/server-id";
+import { getIsolatedDaemonOsHome } from "../support/helpers/isolated-environment";
+import { connectDaemonClient } from "../support/helpers/daemon-client-loader";
+
+base("Malleaf hides global skills and refuses all skill mutations", async ({ page }) => {
+  const files = [".claude", ".codex", ".agents"].map((name) =>
+    path.join(getIsolatedDaemonOsHome(), name, "skills/paseo/SKILL.md"),
+  );
+  for (const file of files) {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, "user-owned skill\n");
+  }
+  await gotoAppShell(page);
+  await openSettings(page);
+  await openHostSection(page, getServerId(), "agents");
+  await expect(page.getByTestId("host-page-inject-mcp-card")).toBeVisible();
+  await expect(page.getByTestId("host-agent-skills-card")).toHaveCount(0);
+  const client = await connectDaemonClient<DaemonClient>({
+    clientIdPrefix: "malleaf-skills-refusal",
+  });
+  try {
+    await expect(client.reconcileAgentSkills()).rejects.toThrow(
+      "does not manage global Paseo skills",
+    );
+    await expect(client.uninstallAgentSkills()).rejects.toThrow(
+      "does not manage global Paseo skills",
+    );
+    await expect(client.saveAgentSkillsSelection({ mode: "all" }, [])).rejects.toThrow(
+      "does not manage global Paseo skills",
+    );
+    for (const file of files) expect(await readFile(file, "utf8")).toBe("user-owned skill\n");
+  } finally {
+    await client.close();
+  }
+});
 
 const test = base.extend<{ skills: AgentSkillsSandbox }>({
   // oxlint-disable-next-line no-empty-pattern -- Playwright requires destructuring for fixture dependency discovery.
@@ -29,7 +68,7 @@ const test = base.extend<{ skills: AgentSkillsSandbox }>({
   },
 });
 
-test.describe("Host agent skills", () => {
+test.describe.skip("Host agent skills (disabled in Malleaf by RFC-0001)", () => {
   test.describe.configure({ timeout: 120_000 });
 
   test("installs a custom selection, cancels a draft, then installs all skills", async ({
@@ -181,7 +220,7 @@ function bundledSkillsLabel(page: Parameters<typeof openSkillSelection>[0]) {
   return page.getByText("Bundled skills", { exact: true });
 }
 
-test.describe("Agent skills sheet inset", () => {
+test.describe.skip("Agent skills sheet inset (disabled in Malleaf by RFC-0001)", () => {
   test.describe.configure({ timeout: 120_000 });
 
   test.describe("compact", () => {

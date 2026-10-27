@@ -95,6 +95,20 @@ describe("applyMutableProviderConfigToOverrides", () => {
 describe("DaemonConfigStore", () => {
   const tempDirs: string[] = [];
 
+  test("Malleaf rejects enabling global hooks without persisting or notifying owners", async () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "malleaf-disabled-hooks-"));
+    tempDirs.push(paseoHome);
+    const store = new DaemonConfigStore(paseoHome, reloadableConfig({ version: 1 }));
+    const changes: boolean[] = [];
+    store.onFieldChange("enableTerminalAgentHooks", (value) => changes.push(value));
+    await expect(store.patch({ enableTerminalAgentHooks: true })).rejects.toThrow(
+      "does not install global harness hooks",
+    );
+    expect(store.get().enableTerminalAgentHooks).toBe(false);
+    expect(changes).toEqual([]);
+    expect(loadPersistedConfig(paseoHome).daemon?.enableTerminalAgentHooks).not.toBe(true);
+  });
+
   afterEach(() => {
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
@@ -805,7 +819,7 @@ describe("DaemonConfigStore", () => {
     expect(persisted.daemon?.appendSystemPrompt).toBe("Prefer terse replies.");
   });
 
-  test("patch persists enable terminal agent hooks into config.json", async () => {
+  test("patch clears a retained global hook setting without enabling hooks", async () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);
 
@@ -816,16 +830,16 @@ describe("DaemonConfigStore", () => {
         providers: {},
         metadataGeneration: { providers: [] },
         autoArchiveAfterMerge: false,
-        enableTerminalAgentHooks: false,
+        enableTerminalAgentHooks: true,
         appendSystemPrompt: "",
       },
       undefined,
     );
 
-    await store.patch({ enableTerminalAgentHooks: true });
+    await store.patch({ enableTerminalAgentHooks: false });
 
     const persisted = loadPersistedConfig(paseoHome);
-    expect(persisted.daemon?.enableTerminalAgentHooks).toBe(true);
+    expect(persisted.daemon?.enableTerminalAgentHooks).toBe(false);
   });
 
   test("patch persists metadata generation providers into config.json", async () => {

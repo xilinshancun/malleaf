@@ -26,6 +26,7 @@ async function pairingOfferFor(daemon: TestPaseoDaemon): Promise<ConnectionOffer
   const pairing = await generateLocalPairingOffer({
     paseoHome: daemon.paseoHome,
     relayEnabled: true,
+    appBaseUrl: "https://app.example.test",
     relayEndpoint,
     relayPublicEndpoint: relayEndpoint,
     relayUseTls: true,

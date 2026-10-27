@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import { createMalleafEnvironment } from "../src/server/malleaf/environment.js";
 
 dotenv.config({
   path: fileURLToPath(new URL("../.env", import.meta.url)),
@@ -8,14 +9,25 @@ dotenv.config({
 });
 
 const daemonRunnerEntry = fileURLToPath(new URL("./supervisor-entrypoint.ts", import.meta.url));
+const developmentRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const derivedEnvironment = createMalleafEnvironment(process.env, { developmentRoot });
+// The shell launcher may have allocated a service port for this checkout.
+// A raw dev invocation must not inherit another checkout's runtime state.
+const developmentEnvironment = createMalleafEnvironment(process.env, {
+  developmentRoot,
+  developmentListen:
+    process.env.MALLEAF_DAEMON_HOME === derivedEnvironment.MALLEAF_DAEMON_HOME
+      ? process.env.MALLEAF_LISTEN
+      : undefined,
+});
 
 const supervisorArgs = [...process.execArgv, daemonRunnerEntry, "--dev", ...process.argv.slice(2)];
 
 const supervisor = spawn(process.execPath, supervisorArgs, {
   stdio: "inherit",
   env: {
-    ...process.env,
-    PASEO_LOG_FORMAT: process.env.PASEO_LOG_FORMAT ?? "pretty",
+    ...developmentEnvironment,
+    MALLEAF_LOG_FORMAT: developmentEnvironment.MALLEAF_LOG_FORMAT ?? "pretty",
   },
 });
 

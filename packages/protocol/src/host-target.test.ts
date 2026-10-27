@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { parseHostTarget } from "./host-target.js";
+import { malleafIdentity } from "./malleaf/product-identity.js";
 
 test.each([
   ["127.0.0.1:6767", "tcp://127.0.0.1:6767"],
@@ -54,7 +55,7 @@ test("SSH aliases and DNS names retain their connection semantics", () => {
 
 test("encoded SSH usernames cannot leak into the target description", () => {
   expect(parseHostTarget("ssh://alice%3Aexample-secret@my-alias").description).toBe(
-    "ssh://my-alias (daemon port 6767)",
+    `ssh://my-alias (daemon port ${malleafIdentity.daemonPort})`,
   );
 });
 

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 import { createRequire } from "node:module";
 import { resolveCliShimPath } from "./path.js";
 import os from "node:os";
@@ -9,7 +10,7 @@ export function getLocalBinDir(): string {
 }
 
 export function getCliTargetPath(): string {
-  const filename = process.platform === "win32" ? "paseo.cmd" : "paseo";
+  const filename = `${malleafIdentity.cliName}${process.platform === "win32" ? ".cmd" : ""}`;
   return path.join(getLocalBinDir(), filename);
 }
 

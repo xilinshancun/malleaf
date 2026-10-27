@@ -26,7 +26,7 @@ export interface HubInitScaffold {
 }
 
 export function hubLoginResumeCommand(step: "connect" | "init", origin: string): string {
-  return step === "connect" ? `paseo hub connect ${origin}` : "paseo hub init";
+  return step === "connect" ? `malleaf hub connect ${origin}` : "malleaf hub init";
 }
 
 export function resolveHubInitConnection(
@@ -88,7 +88,7 @@ function providerScaffold(
       event: "github.issue_comment",
       connection,
       filters: { repo, contains: "@paseo", from_users: [user] },
-      testAction: `Comment \`@paseo have a look\` on ${repo}.`,
+      testAction: `Comment \`@malleaf have a look\` on ${repo}.`,
     };
   }
 

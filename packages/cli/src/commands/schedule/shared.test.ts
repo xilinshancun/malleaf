@@ -65,8 +65,8 @@ describe("parseScheduleCreateInput cwd/host validation", () => {
     );
   });
 
-  test("PASEO_HOST without cwd → throws MISSING_CWD", () => {
-    const daemonTarget = selectDaemonTarget({}, { PASEO_HOST: "dev:12345" });
+  test("MALLEAF_HOST without cwd → throws MISSING_CWD", () => {
+    const daemonTarget = selectDaemonTarget({}, { MALLEAF_HOST: "dev:12345" });
 
     expect(() => parseScheduleCreateInput({ ...baseOptions, daemonTarget })).toThrow(
       expect.objectContaining({
@@ -76,8 +76,8 @@ describe("parseScheduleCreateInput cwd/host validation", () => {
     );
   });
 
-  test("explicit home beats PASEO_HOST and defaults cwd locally", () => {
-    const daemonTarget = selectDaemonTarget({ home: process.cwd() }, { PASEO_HOST: "dev:12345" });
+  test("explicit home beats MALLEAF_HOST and defaults cwd locally", () => {
+    const daemonTarget = selectDaemonTarget({ home: process.cwd() }, { MALLEAF_HOST: "dev:12345" });
     expect(parseScheduleCreateInput({ ...baseOptions, daemonTarget }).target).toEqual({
       type: "new-agent",
       config: { provider: "claude", cwd: process.cwd() },

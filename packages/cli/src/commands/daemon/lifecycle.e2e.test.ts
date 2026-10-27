@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import net from "node:net";
@@ -9,25 +9,48 @@ import { hashDaemonPassword } from "@getpaseo/server/auth";
 import { startDaemonInstance, readDaemonInstance } from "@getpaseo/server/daemon-control";
 import { expect, test } from "vitest";
 import { connectToDaemon } from "../../utils/client.js";
+import { resolveDaemonRunnerEntry } from "./local-daemon.js";
 
 const repo = fileURLToPath(new URL("../../../../..", import.meta.url));
 const cli = path.join(repo, "packages/cli/dist/index.js");
+
+test("Malleaf candidate entry resolution fails closed even when checkout dist exists", () => {
+  expect(() => resolveDaemonRunnerEntry({ MALLEAF_CANDIDATE: "1" })).toThrow(
+    "requires MALLEAF_DAEMON_ENTRY",
+  );
+  expect(() =>
+    resolveDaemonRunnerEntry({ MALLEAF_DAEMON_ENTRY: path.join(repo, "missing-candidate.js") }),
+  ).toThrow("no dist fallback");
+  const entry = path.join(repo, "packages/server/dist/scripts/supervisor-entrypoint.js");
+  expect(resolveDaemonRunnerEntry({ MALLEAF_CANDIDATE: "1", MALLEAF_DAEMON_ENTRY: entry })).toBe(
+    entry,
+  );
+});
 
 async function port() {
   const server = net.createServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const value = (server.address() as net.AddressInfo).port;
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (value === 6767 || value === 6768) throw new Error("Unsafe test port");
+  if ([6767, 6768, 6777, 6778].includes(value)) throw new Error("Unsafe test port");
   return value;
 }
 
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "paseo lifecycle "));
+  const root = await mkdtemp(path.join(tmpdir(), "malleaf lifecycle "));
   const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_"))),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+      ),
+    ),
     HOME: root,
     USERPROFILE: root,
+    CODEX_HOME: path.join(root, ".codex"),
+    CLAUDE_CONFIG_DIR: path.join(root, ".claude"),
+    MALLEAF_HOME: path.join(root, ".malleaf"),
+    MALLEAF_DAEMON_HOME: undefined,
+    MALLEAF_HOST_PASEO_HOME: undefined,
   };
   const homes = [path.join(root, "a"), path.join(root, "b")];
   const owned = new Map<string, { pid: number; startedAt: string }>();
@@ -112,6 +135,124 @@ async function fixture() {
   return { root, homes, env, run, ok, liveStatus, configure, close };
 }
 
+test.each(["Paseo", "Malleaf"])(
+  "Malleaf runs the explicit build without contacting or modifying the hosting %s installation",
+  async (parentProduct) => {
+    const f = await fixture();
+    let home = f.homes[0]!;
+    const daemonPort = await port();
+    const sentinel = net.createServer((socket) => {
+      connections++;
+      socket.destroy();
+    });
+    let connections = 0;
+    await new Promise<void>((resolve) => sentinel.listen(0, "127.0.0.1", resolve));
+    const sentinelPort = (sentinel.address() as net.AddressInfo).port;
+    const files = [
+      ".paseo/config.json",
+      "parent-malleaf/daemon/config.json",
+      ".claude/settings.json",
+      ".codex/hooks.json",
+      ".agents/skills/paseo/SKILL.md",
+      ".claude/skills/paseo/SKILL.md",
+      ".codex/skills/paseo/SKILL.md",
+    ];
+    try {
+      for (const file of files) {
+        await mkdir(path.dirname(path.join(f.root, file)), { recursive: true });
+        await writeFile(path.join(f.root, file), `original ${file}`);
+      }
+      let development: NodeJS.ProcessEnv = {};
+      if (parentProduct === "Malleaf") {
+        development = JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              "--conditions=source",
+              "--import",
+              pathToFileURL(path.join(repo, "node_modules/tsx/dist/loader.mjs")).href,
+              path.join(repo, "scripts/malleaf/development-environment.mts"),
+              repo,
+              "--listen",
+              `127.0.0.1:${daemonPort}`,
+              "--json",
+            ],
+            {
+              env: {
+                ...f.env,
+                MALLEAF_HOME: path.join(f.root, "parent-malleaf"),
+                MALLEAF_DAEMON_HOME: path.join(f.root, "parent-malleaf/daemon"),
+                MALLEAF_HOST: `127.0.0.1:${sentinelPort}`,
+                MALLEAF_LISTEN: `127.0.0.1:${sentinelPort}`,
+                MALLEAF_SERVER_ID: "parent-server",
+                MALLEAF_ACTIVITY_TOKEN: "parent-token",
+              },
+              encoding: "utf8",
+            },
+          ),
+        );
+        home = development.MALLEAF_DAEMON_HOME!;
+        f.homes.push(home);
+        expect(home).not.toBe(path.join(f.root, "parent-malleaf/daemon"));
+        expect(development.MALLEAF_SERVER_ID).toBeUndefined();
+        expect(development.MALLEAF_ACTIVITY_TOKEN).toBeUndefined();
+      }
+      await f.configure(home, `127.0.0.1:${daemonPort}`);
+      const configPath = path.join(home, "config.json");
+      const config = JSON.parse(await readFile(configPath, "utf8"));
+      config.daemon.enableTerminalAgentHooks = true;
+      await writeFile(configPath, JSON.stringify(config));
+      const entry = path.join(repo, "packages/server/dist/scripts/supervisor-entrypoint.js");
+      const inherited = {
+        ...development,
+        PASEO_HOME: path.join(f.root, ".paseo"),
+        PASEO_HOST: `127.0.0.1:${sentinelPort}`,
+        PASEO_CLI: "/Applications/Paseo.app/paseo",
+        PASEO_PASSWORD: "host-password",
+        PASEO_DEV_MANAGED_HOME: "1",
+        PASEO_DEV_SEED_HOME: path.join(f.root, ".paseo"),
+        PASEO_ACTIVITY_TOKEN: "host-token",
+        PASEO_TERMINAL_ACTIVITY_URL: `http://127.0.0.1:${sentinelPort}`,
+        MALLEAF_CANDIDATE: "1",
+        MALLEAF_DAEMON_ENTRY: entry,
+      };
+      const launch = await f.ok(["daemon", "start", "--home", home, "--timeout", "30"], inherited);
+      expect(launch.listen).toBe(`127.0.0.1:${daemonPort}`);
+      expect((await f.liveStatus(home, inherited)).connectedDaemon).toBe("reachable");
+      const project = path.join(f.root, "example-project");
+      await mkdir(project);
+      await f.ok(["project", "create", project, "--home", home], inherited);
+      expect((await f.ok(["project", "ls", "--home", home], inherited)).length).toBe(1);
+      expect(connections).toBe(0);
+      for (const file of files)
+        expect(await readFile(path.join(f.root, file), "utf8")).toBe(`original ${file}`);
+      // The actual supervisor records both selected entries and their contents.
+      const running = await readDaemonInstance(home);
+      expect(running).not.toBeNull();
+      const runtime = JSON.parse(
+        await readFile(path.join(home, "runtime/malleaf-entry.json"), "utf8"),
+      );
+      expect(runtime.pid).toBe(running!.pid);
+      expect(runtime.supervisor.path).toBe(entry);
+      expect(runtime.worker.path).toBe(
+        path.join(repo, "packages/server/dist/server/server/daemon-worker.js"),
+      );
+      const { createHash } = await import("node:crypto");
+      for (const selected of [runtime.supervisor, runtime.worker]) {
+        expect(selected.sha256).toBe(
+          createHash("sha256")
+            .update(await readFile(selected.path))
+            .digest("hex"),
+        );
+      }
+    } finally {
+      await f.close();
+      await new Promise<void>((resolve) => sentinel.close(() => resolve()));
+    }
+  },
+  90_000,
+);
+
 test("managed two-home restart retains its supervisor and never routes ordinary commands or stop to the other home", async () => {
   const f = await fixture();
   const [a, b] = f.homes as [string, string];
@@ -123,12 +264,12 @@ test("managed two-home restart retains its supervisor and never routes ordinary 
     await f.configure(b, `127.0.0.1:${portB}`);
     const launchA = await f.ok(["start", "--home", a, "--timeout", "30"]);
     const poisoned = {
-      PASEO_HOME: a,
-      PASEO_HOST: `127.0.0.1:${portA}`,
-      PASEO_LISTEN: `127.0.0.1:${portA}`,
+      MALLEAF_DAEMON_HOME: a,
+      MALLEAF_HOST: `127.0.0.1:${portA}`,
+      MALLEAF_LISTEN: `127.0.0.1:${portA}`,
       PORT: String(portA),
-      PASEO_WEB_UI_ENABLED: "true",
-      PASEO_RELAY_ENABLED: "true",
+      MALLEAF_WEB_UI_ENABLED: "true",
+      MALLEAF_RELAY_ENABLED: "true",
     };
     const launchB = await f.ok(["daemon", "start", "--home", b, "--timeout", "30"], poisoned);
     expect(launchA.listen).toBe(`127.0.0.1:${portA}`);
@@ -207,7 +348,7 @@ test("local status uses the credential and reports the server id of a password-p
     config.daemon.auth = { password: await hashDaemonPassword("secret") };
     await writeFile(configPath, JSON.stringify(config));
     await f.ok(["start", "--home", home, "--timeout", "30"]);
-    const authenticated = await f.liveStatus(home, { PASEO_PASSWORD: "secret" });
+    const authenticated = await f.liveStatus(home, { MALLEAF_PASSWORD: "secret" });
     expect(await f.ok(["daemon", "status", "--home", home])).toMatchObject({
       connectedDaemon: "reachable",
       serverId: authenticated.serverId,
@@ -292,15 +433,15 @@ test("worker restart preserves an already-running legacy supervisor's launch fla
         "--no-relay",
         "--no-web-ui",
       ],
-      // The legacy CLI translated --port into PASEO_LISTEN before spawning.
-      env: { ...f.env, PASEO_LISTEN: `127.0.0.1:${launchPort}` },
+      // The legacy CLI translated --port into MALLEAF_LISTEN before spawning.
+      env: { ...f.env, MALLEAF_LISTEN: `127.0.0.1:${launchPort}` },
       mode: "deployment",
       timeoutMs: 30_000,
     });
     const before = await f.liveStatus(home);
     expect(before.listen).toBe(`127.0.0.1:${launchPort}`);
     const restarted = await f.ok(["restart", "--home", home, "--timeout", "30"], {
-      PASEO_LISTEN: `127.0.0.1:${filePort}`,
+      MALLEAF_LISTEN: `127.0.0.1:${filePort}`,
     });
     expect(restarted.supervisorPid).toBe(launch.instance.pid);
     expect(restarted.workerPid).not.toBe(before.workerPid);
@@ -320,7 +461,7 @@ test.skipIf(process.platform === "win32")(
       await f.configure(b, `127.0.0.1:${await port()}`);
       await writeFile(path.join(b, "server-id"), "saved-b");
       await f.ok(["start", "--home", a, "--timeout", "30"]);
-      await f.ok(["start", "--home", b, "--timeout", "30"], { PASEO_SERVER_ID: "live-b" });
+      await f.ok(["start", "--home", b, "--timeout", "30"], { MALLEAF_SERVER_ID: "live-b" });
       const beforeA = await f.liveStatus(a);
       expect((await f.liveStatus(b)).serverId).toBe("live-b");
       await f.ok(["restart", "--home", b, "--timeout", "30"]);
@@ -424,7 +565,7 @@ test("empty explicit selectors never select the ambient daemon or create local s
       ["start", "--home", ""],
       ["daemon", "config", "set", "daemon.relay.enabled", "true", "--home", ""],
     ]) {
-      const refused = await f.run(["--json", ...args], { PASEO_HOME: home });
+      const refused = await f.run(["--json", ...args], { MALLEAF_DAEMON_HOME: home });
       expect(refused.code).toBe(1);
       expect(refused.stderr).toContain("TARGET_INVALID");
       expect((await f.liveStatus(home)).workerPid).toBe(before.workerPid);
@@ -516,7 +657,7 @@ test("raw log following subscribes to a stored agent that exists only in B", asy
       [cli, "logs", agentId, "--follow", "--tail", "0", "--home", b],
       {
         cwd: f.root,
-        env: { ...f.env, PASEO_HOME: a, PASEO_HOST: launchA.listen },
+        env: { ...f.env, MALLEAF_DAEMON_HOME: a, MALLEAF_HOST: launchA.listen },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -570,7 +711,7 @@ test("foreground deployment retains environment until its owner ends the launch;
     await f.configure(home, fileEndpoint);
     deployment = spawn(process.execPath, [cli, "daemon", "run", "--home", home], {
       cwd: f.root,
-      env: { ...f.env, PASEO_LISTEN: deploymentEndpoint, PASEO_RELAY_ENABLED: "false" },
+      env: { ...f.env, MALLEAF_LISTEN: deploymentEndpoint, MALLEAF_RELAY_ENABLED: "false" },
       stdio: "ignore",
     });
     await expect
@@ -593,7 +734,7 @@ test("foreground deployment retains environment until its owner ends the launch;
       home,
     ]);
     expect(changed.overrideControlledPaths).toContain("daemon.listen");
-    const restarted = await f.ok(["restart", "--home", home], { PASEO_LISTEN: fileEndpoint });
+    const restarted = await f.ok(["restart", "--home", home], { MALLEAF_LISTEN: fileEndpoint });
     expect(restarted.supervisorPid).toBe(before.pid);
     expect((await f.ok(["status", "--home", home])).listen).toBe(deploymentEndpoint);
     const exited = new Promise((resolve) => deployment!.once("exit", resolve));

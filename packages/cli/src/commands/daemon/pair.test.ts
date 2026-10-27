@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, expect } from "vitest";
 import { resolveLocalPairingOffer } from "./pair.js";
+import { savePersistedConfig } from "@getpaseo/server/configuration";
 
 test("offline pairing requires relay consent and saves it in the selected home", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "paseo-offline-pair-"));
@@ -14,6 +15,7 @@ test("offline pairing requires relay consent and saves it in the selected home",
       url: null,
     });
     expect(existsSync(home)).toBe(false);
+    savePersistedConfig(home, { app: { baseUrl: "https://app.example.test" } });
     const offer = await resolveLocalPairingOffer({ paseoHome: home, enableRelay: true });
     expect(offer.relayEnabled).toBe(true);
     expect(offer.url).toContain("offer=");

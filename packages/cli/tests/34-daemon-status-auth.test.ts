@@ -10,16 +10,16 @@ import { startTestDaemon } from "./helpers/test-daemon.ts";
 console.log("=== Daemon Status Auth ===\n");
 
 const daemon = await startTestDaemon({
-  env: { PASEO_PASSWORD: "shared-secret" },
+  env: { MALLEAF_PASSWORD: "shared-secret" },
 });
 
 try {
   {
     console.log("Test 1: local status uses the daemon's local credential");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
-      PASEO_HOST: "",
-      PASEO_PASSWORD: "",
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
+      MALLEAF_HOST: "",
+      MALLEAF_PASSWORD: "",
     });
 
     assert.strictEqual(result.exitCode, 0, "status should still succeed");
@@ -36,9 +36,9 @@ try {
   {
     console.log("Test 2: status reports rejected supplied password separately");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
-      PASEO_HOST: "",
-      PASEO_PASSWORD: "wrong-secret",
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
+      MALLEAF_HOST: "",
+      MALLEAF_PASSWORD: "wrong-secret",
     });
 
     assert.strictEqual(result.exitCode, 0, "status should still succeed");
@@ -54,9 +54,9 @@ try {
   {
     console.log("Test 3: status reaches the same daemon when password is supplied");
     const result = await runLocalPaseo(["daemon", "status", "--json"], {
-      PASEO_HOME: daemon.paseoHome,
-      PASEO_HOST: "",
-      PASEO_PASSWORD: "shared-secret",
+      MALLEAF_DAEMON_HOME: daemon.paseoHome,
+      MALLEAF_HOST: "",
+      MALLEAF_PASSWORD: "shared-secret",
     });
 
     assert.strictEqual(result.exitCode, 0, "status should succeed with password");
@@ -74,7 +74,7 @@ try {
 
 // POSIX executable probing executes --version; Windows resolves executables differently.
 if (process.platform !== "win32") {
-  const root = await mkdtemp(join(tmpdir(), "paseo status slow provider "));
+  const root = await mkdtemp(join(tmpdir(), "malleaf status slow provider "));
   const home = join(root, "daemon");
   const workDir = join(root, "work");
   const provider = join(root, "slow-provider");
@@ -103,11 +103,11 @@ import('node:fs').then(({appendFileSync}) => {
     slowDaemon = await startTestDaemon({
       paseoHome: home,
       workDir,
-      env: { PASEO_PASSWORD: "shared-secret" },
+      env: { MALLEAF_PASSWORD: "shared-secret" },
     });
     console.log("Test 4: local status separates authenticated reachability from slow details");
     const local = await runLocalPaseo(["daemon", "status", "--home", home, "--json"], {
-      PASEO_PASSWORD: "shared-secret",
+      MALLEAF_PASSWORD: "shared-secret",
     });
     assert.strictEqual(local.exitCode, 0, local.stderr);
     const status = JSON.parse(local.stdout);
@@ -128,7 +128,7 @@ import('node:fs').then(({appendFileSync}) => {
     console.log("Test 5: explicit endpoint status remains an error when details time out");
     const remote = await runLocalPaseo(
       ["daemon", "status", "--host", `127.0.0.1:${slowDaemon.port}`, "--json"],
-      { PASEO_PASSWORD: "shared-secret" },
+      { MALLEAF_PASSWORD: "shared-secret" },
     );
     assert.notStrictEqual(remote.exitCode, 0);
     const { error } = JSON.parse(remote.stderr);
