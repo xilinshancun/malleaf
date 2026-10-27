@@ -62,7 +62,7 @@ try {
   {
     console.log("Test 3: malleaf ls handles daemon not running");
     const result = await runLocalPaseo(["ls"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     // Should fail because daemon not running
     assert.notStrictEqual(result.exitCode, 0, "should fail when daemon not running");

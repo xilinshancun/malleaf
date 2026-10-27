@@ -113,7 +113,7 @@ The connection-offer subprocess listening check now binds loopback. It asserts s
 
 ### Local acceptance evidence (2026-10-28)
 
-Subject: `feat/personal-versions` implementation worktree; immutable commit reference will be recorded with the PR and remote CI result. All commands ran from this repository with Node 22.23.4 on macOS arm64. No user daemon was restarted.
+Subject: foundation commit `96a494b8d4c415e603b2c92aef258fe3ce918cf0`, scheduler fixture correction `a48011a67a79b491bdf9ef36aefeed78148684f3`, and follow-up CI fixture corrections in [PR #1](https://github.com/xilinshancun/malleaf/pull/1). All local commands ran from this repository with Node 22.23.4 on macOS arm64. No user daemon was restarted.
 
 | Check                                                                            | Result                                                                                                                                                               | Local log                                                                        |
 | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -129,3 +129,13 @@ Subject: `feat/personal-versions` implementation worktree; immutable commit refe
 | `node packages/desktop/e2e/daemon-lifecycle.e2e.mjs` after `build:main`          | Exit 0; real Electron lifecycle, attached-daemon ownership, restart, settings, and slow-start recovery                                                               | `/tmp/malleaf-desktop-lifecycle.log`                                             |
 
 Limitations: the complete signed/packaged desktop application has not been built or launched; packaging hooks have fixture coverage. Entry hashes are diagnostic provenance, not a manifest proving the latest complete build (RFC-0002 owns that). Real-provider tests were not run in this RFC. Windows/mobile behavior awaits CI/platform validation. Explicit relay enablement still selects the upstream relay unless a different endpoint is configured. Development accepts `--listen`; the ineffective inherited skip-build flag was removed.
+
+### Remote CI findings and focused corrections
+
+[Run 40562394033](https://github.com/xilinshancun/malleaf/actions/runs/40562394033) on `96a494b8d` passed typecheck, including the website and public package checks. Before being superseded it failed protocol/default-port assertions, CLI fixture home/target selection, App localhost expectations, and desktop fixtures. Opus independently traced those failures to tests that still assumed upstream identity or configuration. The desktop attachment fixture also exposed a real test-isolation gap: it used an ignored `PASEO_HOME` and could write default Malleaf state. Desktop tests now initialize disposable OS, product, and provider directories at suite entry.
+
+Follow-up acceptance: CLI files 04, 17, 25, 28, and 31 passed against real isolated daemons; protocol host-target tests passed 25; App host-runtime passed 103; desktop attachments/navigation/update boundary passed 16, with 9 Linux launcher cases skipped on macOS and deferred to CI. Logs are `/tmp/malleaf-ci-cli-fix-*.log`, `/tmp/malleaf-ci-{protocol,app,desktop}-fixes.log`; typecheck and lint passed in `/tmp/malleaf-ci-fixes-{typecheck,lint}.log`. The disabled production updater is now tested for making no upstream requests; generic updater error behavior remains covered by `app-update-service.test.ts`.
+
+[Run 40563736857](https://github.com/xilinshancun/malleaf/actions/runs/40563736857) additionally exposed legacy relay-default and hook-toggle assertions, plus a CLI subprocess fixture still supplying upstream agent identity. Malleaf requires explicit relay opt-in even for imported configurations, refuses global hook installation, and accepts session context at the CLI boundary only through its own namespace. After correcting those fixtures, 25 config/hook tests passed and the real connected-host report test passed (27 unrelated cases filtered), logged in `/tmp/malleaf-ci-server-unit-fixes.log` and `/tmp/malleaf-ci-connected-hosts-fix.log`.
+
+Cancelled jobs are not passes. Final-head remote CI and independent review remain required before marking this RFC verified.

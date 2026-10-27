@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { malleafIdentity } from "@getpaseo/protocol/malleaf/product-identity";
 import type { AppStateStatus } from "react-native";
 import {
   bindHostRuntimeAppState,
@@ -4282,7 +4283,7 @@ describe("HostRuntimeStore", () => {
 
     expect(requests).toEqual([]);
     expect(store.getHosts().map((host) => host.serverId)).toEqual([
-      "srv_localhost:6767",
+      `srv_localhost:${malleafIdentity.daemonPort}`,
       "srv_10.0.0.5:6767",
     ]);
     store.syncHosts([]);

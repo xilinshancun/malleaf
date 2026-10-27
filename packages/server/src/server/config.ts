@@ -319,8 +319,7 @@ function resolveRelayEndpoints(input: ResolveRelayInput): {
 
 function resolveRelayConfig(input: ResolveRelayInput): ResolvedRelay {
   const environmentEnabled = parseBooleanEnv(input.env.PASEO_RELAY_ENABLED);
-  // COMPAT(relayOptInDefault): daemons whose startup config omitted this field
-  // retain relay-on removal semantics until 2027-01-31. Modern homes use false.
+  // MALLEAF: imported configs also require an explicit relay opt-in.
   const enabled =
     input.cliRelayEnabled ??
     environmentEnabled ??

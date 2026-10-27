@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,19 +81,24 @@ describe("applyTerminalAgentHookSetting", () => {
     expect(existsSync(paths.opencode)).toBe(true);
   });
 
-  it("installs on enable and removes hooks on disable when toggled live", async () => {
+  it("refuses global hook opt-in and preserves existing harness configuration", async () => {
     const root = createTempDir("paseo-hook-setting-");
     const store = createStore(createTempDir("paseo-hook-setting-home-"), false);
     const paths = hookPaths(root);
 
-    applyTerminalAgentHookSetting({ store, install: createInstallEnv(root) });
-    expect(existsSync(paths.opencode)).toBe(false);
+    await mkdir(join(root, "claude"));
+    await mkdir(join(root, "codex"));
+    const existing = '{"hooks":{"user-owned":true}}\n';
+    await writeFile(paths.claude, existing);
+    await writeFile(paths.codex, existing);
 
-    await store.patch({ enableTerminalAgentHooks: true });
-    expect(existsSync(paths.codex)).toBe(true);
-    expect(existsSync(paths.opencode)).toBe(true);
+    await expect(store.patch({ enableTerminalAgentHooks: true })).rejects.toThrow(
+      "Malleaf does not install global harness hooks",
+    );
 
     await store.patch({ enableTerminalAgentHooks: false });
+    expect(await readFile(paths.claude, "utf8")).toBe(existing);
+    expect(await readFile(paths.codex, "utf8")).toBe(existing);
     expect(existsSync(paths.opencode)).toBe(false);
   });
 });

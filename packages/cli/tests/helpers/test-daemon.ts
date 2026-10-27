@@ -374,7 +374,7 @@ export async function runPaseoCli(
           ),
         ),
         ...TEST_DAEMON_ENV_DEFAULTS,
-        MALLEAF_DAEMON_HOME: testOsHome,
+        MALLEAF_DAEMON_HOME: ctx.paseoHome || join(testOsHome, ".malleaf", "daemon"),
         ...options?.env,
         HOME: testOsHome,
         USERPROFILE: testOsHome,

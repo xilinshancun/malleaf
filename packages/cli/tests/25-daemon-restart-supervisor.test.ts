@@ -19,6 +19,7 @@ import {
 import { readDaemonInstance, isSameDaemonInstance } from "@getpaseo/server/daemon-control";
 import { runLocalPaseo } from "./helpers/local-cli.ts";
 import { getAvailablePort } from "./helpers/network.ts";
+import { testOsHome } from "./helpers/test-os-home.js";
 
 const pollIntervalMs = 100;
 const daemonReadyTimeoutMs = 120_000;
@@ -113,8 +114,8 @@ import('node:fs').then(({appendFileSync}) => {
             ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
           ),
         ),
-        HOME: paseoHome,
-        USERPROFILE: paseoHome,
+        HOME: testOsHome,
+        USERPROFILE: testOsHome,
         ...testEnv,
         MALLEAF_DAEMON_HOME: paseoHome,
         MALLEAF_LISTEN: host,

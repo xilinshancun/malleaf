@@ -1654,7 +1654,7 @@ test(
         "--json",
       ],
       {
-        env: { ...process.env, PASEO_AGENT_ID: parent.id },
+        env: { ...process.env, MALLEAF_AGENT_ID: parent.id },
         timeout: 15000,
       },
     );

@@ -72,6 +72,16 @@ try {
   console.log("✓ onboarding keeps relay disabled and waits for daemon readiness\n");
 
   console.log("Test 2: --no-relay suppresses pairing for an already-running daemon");
+  const appUrl = await runLocalPaseo([
+    "daemon",
+    "config",
+    "set",
+    "app.baseUrl",
+    "https://app.example.test",
+    "--home",
+    paseoHome,
+  ]);
+  assert.strictEqual(appUrl.exitCode, 0, appUrl.stderr);
   const enableRelay =
     await $`MALLEAF_DAEMON_HOME=${paseoHome} ${process.execPath} ${CLI_BIN_PATH} daemon pair --home ${paseoHome} --relay`.nothrow();
   assert.strictEqual(enableRelay.exitCode, 0, `relay enable should succeed: ${enableRelay.stderr}`);

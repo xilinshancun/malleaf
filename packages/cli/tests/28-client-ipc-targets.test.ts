@@ -84,8 +84,13 @@ console.log("=== CLI IPC Target Helpers ===\n");
   );
   assert.deepStrictEqual(target, { kind: "instance", home: "/tmp/selected-home" });
   assert.strictEqual(getDaemonHost({ target }), "home /tmp/selected-home");
-  assert.throws(() =>
+  assert.deepStrictEqual(
     selectDaemonTarget({}, { MALLEAF_DAEMON_HOME: "/tmp/a", PASEO_HOST: "unused:12345" }),
+    { kind: "instance", home: "/tmp/a" },
+  );
+  assert.deepStrictEqual(
+    selectDaemonTarget({}, { MALLEAF_DAEMON_HOME: "/tmp/a", MALLEAF_HOST: "selected:12345" }),
+    { kind: "endpoint", host: "selected:12345" },
   );
 }
 
