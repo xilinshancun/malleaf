@@ -152,17 +152,19 @@ export async function createIsolatedActivation(options: {
     pair: RuntimePair,
     daemonHome = epochHome(home, pair),
     environment = options.environment,
+    bootDrainId?: string,
   ) {
     await assertAcceptanceEpoch(daemonHome);
     await clearStopped(role);
     const token = randomUUID();
-    await ledger.intent(role, { home: daemonHome, buildId: pair.buildId, token });
+    await ledger.intent(role, { home: daemonHome, buildId: pair.buildId, token, bootDrainId });
     try {
       const handle = await launchRuntime({
         ...target(pair, daemonHome),
         environment: {
           ...environment,
           MALLEAF_HOME: home,
+          MALLEAF_BOOT_DRAIN_ID: bootDrainId,
           MALLEAF_CLI: path.join(slot(pair), "packages/cli/bin/paseo"),
         },
         recordInstance: async (instance) => {
@@ -216,6 +218,8 @@ export async function createIsolatedActivation(options: {
       try {
         if (!handle.client.supportsMalleafQuiesceCommit())
           throw new StorageError("unsupported_schema", "Candidate lacks atomic drain commit");
+        if (!handle.client.supportsMalleafBootDrain())
+          throw new StorageError("unsupported_schema", "Candidate lacks boot admission gating");
         const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
         if (status.state !== "accepting")
           throw new StorageError("state_conflict", "Preflight is not accepting work");
@@ -276,11 +280,21 @@ export async function createIsolatedActivation(options: {
       return true;
     }
     if (status.state === "draining") {
-      if (!transaction || status.drainId !== transaction.drainId)
+      const drainId = status.expiresAt === null ? plan.attach.bootDrainId : transaction?.drainId;
+      const selected = await pointer.read();
+      if (
+        !drainId ||
+        status.drainId !== drainId ||
+        !(
+          samePair(selected.current, plan.target) ||
+          (selected.trial && samePair(selected.trial.pair, plan.target))
+        )
+      )
         throw new StorageError("state_conflict", "Another owner controls the runtime drain");
+      assertOwned();
       await handle.client.quiesceDaemon({
         action: "end",
-        drainId: transaction.drainId,
+        drainId,
         deadlineMs: 1000,
       });
     }
@@ -382,12 +396,22 @@ export async function createIsolatedActivation(options: {
       await executeEpochCopy(plan);
       await journal.advance(request.switchId, "cloned");
       await journal.advance(request.switchId, "starting");
-      const handle = await launch("candidate", transaction.candidate);
+      const bootDrainId = randomUUID();
+      const handle = await launch(
+        "candidate",
+        transaction.candidate,
+        epochHome(home, transaction.candidate),
+        options.environment,
+        bootDrainId,
+      );
       running = { pair: transaction.candidate, role: "candidate", handle };
       await journal.advance(request.switchId, "probing");
       const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
       if (
-        status.state !== "accepting" ||
+        !handle.client.supportsMalleafBootDrain() ||
+        status.state !== "draining" ||
+        status.expiresAt !== null ||
+        status.drainId !== bootDrainId ||
         status.terminals ||
         status.scripts ||
         hasPendingDrainWork(status)
@@ -396,6 +420,8 @@ export async function createIsolatedActivation(options: {
       await journal.afterPointer(request.switchId, "trial", () =>
         pointer.beginTrial({ pair: transaction.candidate, ...decision(transaction) }),
       );
+      assertOwned();
+      await handle.client.quiesceDaemon({ action: "end", drainId: bootDrainId });
     } catch (error) {
       if (!(await recoverFailedActivation(transaction, error))) throw error;
     }
@@ -451,22 +477,41 @@ export async function createIsolatedActivation(options: {
     if (running) running.role = "baseline";
     return result();
   }
+  async function commitTrialStop(transaction: SwitchTransaction) {
+    const current = requireRunning(transaction.candidate);
+    const status = await current.handle.client.quiesceDaemon({
+      action: "status",
+      deadlineMs: 1000,
+    });
+    if (status.state === "shutdown") return true;
+    if (status.state === "draining" && status.expiresAt === null) {
+      const registration = (await ledger.read()).registrations[current.role];
+      if (!registration?.bootDrainId || registration.bootDrainId !== status.drainId)
+        throw new StorageError("state_conflict", "Trial boot gate has an unknown owner");
+      assertOwned();
+      // Revert must not require opening an unpublished-work gate, including when
+      // its durable release previously failed. Commit checks the barriers itself.
+      await current.handle.client.quiesceDaemon({
+        action: "commit",
+        drainId: registration.bootDrainId,
+        deadlineMs: 1000,
+      });
+      return true;
+    }
+    return drainAndCommit({
+      runtime: current.handle,
+      drainId: transaction.drainId,
+      deadlineMs,
+      assertOwned,
+    });
+  }
   async function revert(switchId: string) {
     const transaction = await transactionFor(switchId);
     if (transaction.step === "rolled_back") return result();
     const state = await pointer.read();
     if (state.trial?.switchId !== switchId)
       throw new StorageError("state_conflict", "No matching trial can be reverted");
-    const current = requireRunning(transaction.candidate);
-    if (
-      !(await drainAndCommit({
-        runtime: current.handle,
-        drainId: transaction.drainId,
-        deadlineMs,
-        assertOwned,
-      }))
-    )
-      return { ...(await result()), paused: true };
+    if (!(await commitTrialStop(transaction))) return { ...(await result()), paused: true };
     await journal.advance(switchId, "reverting");
     await stopRunning(transaction.candidate);
     await rollback(transaction);

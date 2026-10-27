@@ -306,7 +306,7 @@ export class ScheduleService {
   async start(): Promise<void> {
     await this.recoverInterruptedRuns();
     await this.sweepOrphanedSchedules();
-    this.resumeAfterDrain();
+    if (!this.paused) this.resumeAfterDrain();
   }
 
   // A live paused run is not an interrupted run. Do not apply boot recovery here.
@@ -324,12 +324,16 @@ export class ScheduleService {
     this.tickTimer = timer;
   }
 
-  async stop(options?: { drainTimeoutMs?: number }): Promise<void> {
+  pauseForDrain(): void {
     this.paused = true;
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
+  }
+
+  async stop(options?: { drainTimeoutMs?: number }): Promise<void> {
+    this.pauseForDrain();
     if (options?.drainTimeoutMs !== undefined) {
       await withTimeout({
         promise: Promise.allSettled(this.activeOperations),

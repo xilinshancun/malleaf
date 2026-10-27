@@ -87,6 +87,62 @@ test("Malleaf quiesce replies reach a modern client and expiry restores admissio
   }
 }, 20_000);
 
+test("Malleaf boot admission stays closed until selected and remains released after restart", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "malleaf-boot-wire-"));
+  const previous = process.env.MALLEAF_BOOT_DRAIN_ID;
+  const drainId = randomUUID();
+  process.env.MALLEAF_BOOT_DRAIN_ID = drainId;
+  let daemon: Awaited<ReturnType<typeof createTestPaseoDaemon>> | undefined;
+  let client: DaemonClient | undefined;
+  const connect = async () => {
+    daemon = await createTestPaseoDaemon({
+      mcpEnabled: false,
+      cleanup: false,
+      paseoHomeRoot: root,
+      staticDir: path.join(root, "static"),
+    });
+    client = new DaemonClient({
+      url: `ws://127.0.0.1:${daemon.port}/ws`,
+      capabilities: { owned_subscriptions: true },
+      reconnect: { enabled: false },
+    });
+    await client.connect();
+    return client;
+  };
+  try {
+    const first = await connect();
+    expect(first.supportsMalleafBootDrain()).toBe(true);
+    expect(await first.quiesceDaemon({ action: "status", deadlineMs: 1000 })).toMatchObject({
+      state: "draining",
+      drainId,
+      expiresAt: null,
+      pendingScheduleRuns: 0,
+    });
+    await expect(first.createAgent({ provider: "codex", cwd: root })).rejects.toThrow(/draining/);
+    await expect(
+      first.quiesceDaemon({ action: "end", drainId: randomUUID(), deadlineMs: 1000 }),
+    ).rejects.toThrow("drain_not_owned");
+    await first.quiesceDaemon({ action: "end", drainId, deadlineMs: 1000 });
+    await first.close();
+    await daemon!.close();
+    daemon = undefined;
+    const restarted = await connect();
+    expect(await restarted.quiesceDaemon({ action: "status", deadlineMs: 1000 })).toMatchObject({
+      state: "accepting",
+      drainId: null,
+    });
+    await expect(restarted.createAgent({ provider: "codex", cwd: root })).resolves.toHaveProperty(
+      "id",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.MALLEAF_BOOT_DRAIN_ID;
+    else process.env.MALLEAF_BOOT_DRAIN_ID = previous;
+    await client?.close();
+    await daemon?.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));
 }

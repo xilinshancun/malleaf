@@ -8487,6 +8487,7 @@ test("gates atomic Malleaf drain commit separately from ordinary quiesce", async
   await connecting;
   expect(client.supportsMalleaf()).toBe(true);
   expect(client.supportsMalleafQuiesceCommit()).toBe(false);
+  expect(client.supportsMalleafBootDrain()).toBe(false);
   await expect(
     client.quiesceDaemon({ action: "commit", drainId: "00000000-0000-4000-8000-000000000001" }),
   ).rejects.toThrow("Update the host to support atomic Malleaf drain commit.");

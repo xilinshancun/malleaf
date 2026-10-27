@@ -17,7 +17,12 @@ class ManualClock implements QuiesceClock {
 }
 
 function fixture(
-  overrides: { start?: () => Promise<void>; stop?: () => Promise<void>; idle?: boolean } = {},
+  overrides: {
+    start?: () => Promise<void>;
+    stop?: () => Promise<void>;
+    idle?: boolean;
+    release?: () => Promise<void>;
+  } = {},
 ) {
   const clock = new ManualClock();
   const calls: string[] = [];
@@ -48,6 +53,9 @@ function fixture(
       getDrainWork: () => work,
     },
     schedules: {
+      pauseForDrain: () => {
+        calls.push("pause schedules");
+      },
       stop: async () => {
         calls.push("pause schedules");
         await overrides.stop?.();
@@ -57,6 +65,10 @@ function fixture(
         await overrides.start?.();
       },
       pendingRuns: () => pending.schedules,
+    },
+    releaseBootDrain: async () => {
+      calls.push("persist release");
+      await overrides.release?.();
     },
     pendingDeliveries: () => pending.deliveries,
     countResources: async () => ({ terminals: 2, scripts: 1 }),
@@ -263,4 +275,73 @@ test("expiry queued before commit wins and cannot be turned into an unowned stop
   expect(calls).toContain("accept");
   expect(calls).not.toContain("shutdown");
   expect(await controller.status()).toMatchObject({ state: "accepting" });
+});
+
+test("boot gate never expires or becomes a timed drain, and releases only after persistence", async () => {
+  const { controller, clock, calls } = fixture({ idle: true });
+  controller.adoptBootDrain(drainId);
+  expect(clock.callbacks.size).toBe(0);
+  clock.time = 1_000_000;
+  expect(await controller.begin({ drainId, deadlineMs: 1000 })).toMatchObject({
+    state: "draining",
+    expiresAt: null,
+  });
+  expect(clock.callbacks.size).toBe(0);
+  await expect(controller.end(anotherId)).rejects.toThrow("drain_not_owned");
+  await expect(controller.begin({ drainId: anotherId, deadlineMs: 1000 })).rejects.toThrow(
+    "drain_active",
+  );
+  expect(await controller.end(drainId)).toMatchObject({ state: "accepting" });
+  await controller.end(drainId);
+  expect(calls).toEqual([
+    "pause schedules",
+    "drain",
+    "persist release",
+    "accept",
+    "resume schedules",
+  ]);
+});
+
+test("failed boot release persistence keeps the gate closed and allows a retry", async () => {
+  let rejectRelease = true;
+  const { controller, calls } = fixture({
+    idle: true,
+    release: async () => {
+      if (rejectRelease) throw new Error("disk full");
+    },
+  });
+  controller.adoptBootDrain(drainId);
+  await expect(controller.end(drainId)).rejects.toThrow("disk full");
+  expect(await controller.status()).toMatchObject({ state: "draining", drainId, expiresAt: null });
+  expect(calls).not.toContain("accept");
+  rejectRelease = false;
+  await controller.end(drainId);
+  expect(calls).toContain("accept");
+});
+
+test("shutdown during boot release persistence cannot reopen admission", async () => {
+  let release!: () => void;
+  const persisting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { controller, calls } = fixture({ idle: true, release: () => persisting });
+  controller.adoptBootDrain(drainId);
+  const ending = controller.end(drainId);
+  await expect.poll(() => calls.includes("persist release")).toBe(true);
+  const disposing = controller.dispose();
+  release();
+  await ending;
+  await disposing;
+  expect(await controller.status()).toMatchObject({ state: "shutdown" });
+  expect(calls).not.toContain("accept");
+  expect(calls).not.toContain("resume schedules");
+});
+
+test("boot gate can commit without an expiry or a persisted release", async () => {
+  const { controller, calls, clock } = fixture({ idle: true });
+  controller.adoptBootDrain(drainId);
+  clock.time = 1_000_000;
+  expect(await controller.commit(drainId)).toMatchObject({ state: "shutdown", expiresAt: null });
+  expect(calls).not.toContain("persist release");
+  await expect(controller.end(drainId)).rejects.toThrow("daemon_stopping");
 });

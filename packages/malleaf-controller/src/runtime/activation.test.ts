@@ -19,6 +19,7 @@ const fake = vi.hoisted(() => ({
   events: [] as string[],
   fail: null as null | { dataId: string; cleanup: "verified" | "unverified" },
   ordinal: 0,
+  failBootEnd: false,
 }));
 
 vi.mock("./daemon.js", async (importOriginal) => {
@@ -43,6 +44,7 @@ vi.mock("./daemon.js", async (importOriginal) => {
     },
     launchRuntime: async (options: {
       daemonHome: string;
+      environment: NodeJS.ProcessEnv;
       recordInstance(instance: DaemonInstance): Promise<void>;
     }) => {
       const home = options.daemonHome;
@@ -63,8 +65,8 @@ vi.mock("./daemon.js", async (importOriginal) => {
       await writeFile(path.join(home, "paseo.pid"), JSON.stringify(instance));
       await options.recordInstance(instance);
       const status: MalleafQuiesceStatus = {
-        state: "accepting",
-        drainId: null,
+        state: options.environment.MALLEAF_BOOT_DRAIN_ID ? "draining" : "accepting",
+        drainId: options.environment.MALLEAF_BOOT_DRAIN_ID ?? null,
         expiresAt: null,
         running: [],
         pendingPermissions: [],
@@ -81,6 +83,7 @@ vi.mock("./daemon.js", async (importOriginal) => {
         instance,
         client: {
           supportsMalleafQuiesceCommit: () => true,
+          supportsMalleafBootDrain: () => true,
           close: async () => {},
           quiesceDaemon: async (input: {
             action: string;
@@ -95,8 +98,13 @@ vi.mock("./daemon.js", async (importOriginal) => {
                 expiresAt: Date.now() + (input.deadlineMs ?? 1000),
               });
             if (input.action === "commit") status.state = "shutdown";
-            if (input.action === "end")
+            if (input.action === "end") {
+              if (fake.failBootEnd && status.expiresAt === null && status.state === "draining") {
+                fake.failBootEnd = false;
+                throw new Error("boot release write failed");
+              }
               Object.assign(status, { state: "accepting", drainId: null, expiresAt: null });
+            }
             return { ...status };
           },
         },
@@ -119,6 +127,7 @@ afterEach(async () => {
   fake.status.clear();
   fake.events.length = 0;
   fake.fail = null;
+  fake.failBootEnd = false;
   for (const root of roots.splice(0)) await removeFixture(root);
 });
 
@@ -179,6 +188,13 @@ test("healthy trial, keep and repeated request preserve the original epoch", asy
   expect(trial.pointer.current).toEqual(f.baseline);
   expect(trial.pointer.trial?.pair).toEqual(f.request.candidate);
   expect(trial.transaction?.step).toBe("trial");
+  expect((await f.ledger.read()).registrations.candidate?.bootDrainId).toBeTypeOf("string");
+  expect((await f.ledger.read()).registrations.candidate?.bootDrainId).not.toBe(
+    f.request.switchToken,
+  );
+  expect(fake.status.get(path.join(await realpath(f.home), "data/candidate"))?.state).toBe(
+    "accepting",
+  );
   const kept = await f.controller.keep(f.request.switchId);
   expect(kept.pointer).toMatchObject({
     current: f.request.candidate,
@@ -337,6 +353,11 @@ test("a durable trial survives a failed journal publication and is recovered wit
   });
   await failing.recover();
   await expect(failing.activate(f.request)).rejects.toThrow("trial journal publication failed");
+  expect(fake.status.get(path.join(await realpath(f.home), "data/candidate"))).toMatchObject({
+    state: "draining",
+    drainId: (await f.ledger.read()).registrations.candidate?.bootDrainId,
+    expiresAt: null,
+  });
   expect((await f.pointer.read()).trial?.pair).toEqual(f.request.candidate);
   const recovered = await (await createIsolatedActivation(f)).recover();
   expect(recovered.transaction?.step).toBe("trial");
@@ -362,4 +383,43 @@ test("drain timeout has explicit retry and abort exits before any stop", async (
   resumed.running = ["accepted"];
   expect((await f.controller.activate(second)).transaction?.step).toBe("drain_timeout");
   expect((await f.controller.abort(second.switchId)).transaction?.step).toBe("aborted");
+});
+
+test("a selected current boot gate releases with ledger ownership after the journal changes", async () => {
+  const f = await fixture();
+  await f.controller.activate(f.request);
+  await f.controller.keep(f.request.switchId);
+  const registration = (await f.ledger.read()).registrations.baseline;
+  expect(registration?.bootDrainId).toBeTypeOf("string");
+  const next = {
+    ...f.request,
+    switchId: randomUUID(),
+    switchToken: randomUUID(),
+    drainId: randomUUID(),
+    baseline: f.request.candidate,
+    copySource: f.request.candidate,
+    candidate: { buildId: f.baseline.buildId, dataId: "another-epoch" },
+  };
+  await f.journal.begin(next, await f.pointer.read());
+  const status = fake.status.get(path.join(await realpath(f.home), "data/candidate"))!;
+  Object.assign(status, { state: "draining", drainId: registration?.bootDrainId, expiresAt: null });
+  await f.controller.disconnect();
+  const recovered = await (await createIsolatedActivation(f)).recover();
+  expect(recovered.transaction?.step).toBe("aborted");
+  expect(status.state).toBe("accepting");
+});
+
+test("trial can revert a failed boot release without first opening admission or reconnecting", async () => {
+  const f = await fixture();
+  fake.failBootEnd = true;
+  await expect(f.controller.activate(f.request)).rejects.toThrow("boot release write failed");
+  expect((await f.pointer.read()).trial?.pair).toEqual(f.request.candidate);
+  expect(fake.status.get(path.join(await realpath(f.home), "data/candidate"))?.state).toBe(
+    "draining",
+  );
+  const reverted = await f.controller.revert(f.request.switchId);
+  expect(reverted.transaction?.step).toBe("rolled_back");
+  expect(reverted.pointer.current).toEqual(f.baseline);
+  expect(fake.events).not.toContain("rpc:candidate:begin");
+  expect(fake.events).toContain("rpc:candidate:commit");
 });

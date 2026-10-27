@@ -13,6 +13,7 @@ const launchSchema = z.looseObject({
   buildId: runtimePairSchema.shape.buildId,
   token: z.string().uuid(),
   at: z.string().datetime(),
+  bootDrainId: z.string().uuid().optional(),
 });
 const instanceSchema = z.looseObject({
   pid: z.number().int().positive(),
@@ -32,7 +33,7 @@ interface LedgerOptions {
   home: string;
   assertOwned(): void;
 }
-type LaunchIntent = Pick<InstanceRegistration, "home" | "buildId" | "token">;
+type LaunchIntent = Pick<InstanceRegistration, "home" | "buildId" | "token" | "bootDrainId">;
 
 export function matchesRegisteredInstance(
   registration: InstanceRegistration,

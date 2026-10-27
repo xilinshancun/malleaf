@@ -8,7 +8,10 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { preparePreflight } from "../../packages/malleaf-controller/dist/runtime/preflight.js";
 import { createIsolatedActivation } from "../../packages/malleaf-controller/dist/runtime/activation.js";
-import { stopRuntimeInstance } from "../../packages/malleaf-controller/dist/runtime/daemon.js";
+import {
+  attachRuntime,
+  stopRuntimeInstance,
+} from "../../packages/malleaf-controller/dist/runtime/daemon.js";
 import {
   materializeSlot,
   verifySlot,
@@ -118,6 +121,7 @@ const pids = new Set();
 const launches = new Map();
 const acquired = new Map();
 const knownByHome = new Map();
+const bootSnapshots = [];
 const originalIntent = ledger.intent;
 ledger.intent = async (role, input) => {
   const result = await originalIntent(role, input);
@@ -132,7 +136,49 @@ ledger.acquired = async (role, token, instance) => {
   pids.add(instance.pid);
   acquired.set(instance.pid, acquisition);
   knownByHome.set(intent.home, acquisition);
-  return originalAcquired(role, token, instance);
+  const result = await originalAcquired(role, token, instance);
+  if (
+    role === "candidate" &&
+    instance.listen &&
+    !bootSnapshots.some((snapshot) => snapshot.pid === instance.pid)
+  ) {
+    const observer = await attachRuntime({
+      slotDirectory: path.join(versionsRoot, intent.buildId),
+      buildId: intent.buildId,
+      daemonHome: intent.home,
+      expected: instance,
+      clientId: randomUUID(),
+      assertOwned: lease.assertOwned,
+    });
+    try {
+      const status = await observer.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+      await assert.rejects(readFile(path.join(intent.home, "runtime/boot-drain-released.json")), {
+        code: "ENOENT",
+      });
+      assert.equal(
+        (await pointer.read()).trial,
+        null,
+        "gate must be observed before trial publication",
+      );
+      const snapshot = {
+        pid: instance.pid,
+        dataId: path.basename(intent.home),
+        bootDrainId: intent.bootDrainId,
+        at: new Date().toISOString(),
+        status,
+        markerAbsentBeforeTrial: true,
+      };
+      bootSnapshots.push(snapshot);
+      if (snapshot.dataId !== "probe-fail") {
+        assert.equal(status.state, "draining");
+        assert.equal(status.drainId, intent.bootDrainId);
+        assert.equal(status.expiresAt, null);
+      }
+    } finally {
+      await observer.client.close();
+    }
+  }
+  return result;
 };
 const options = {
   acceptanceRoot: prepared.root,
@@ -163,6 +209,13 @@ async function record(label, result) {
       ? await result.runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 })
       : null,
   };
+  const acquiredEntry = result.runtime && acquired.get(result.runtime.instance.pid);
+  if (acquiredEntry?.bootDrainId && snapshot.status?.state === "accepting") {
+    snapshot.bootRelease = JSON.parse(
+      await readFile(path.join(acquiredEntry.home, "runtime/boot-drain-released.json"), "utf8"),
+    );
+    assert.equal(snapshot.bootRelease.drainId, acquiredEntry.bootDrainId);
+  }
   stages.push(snapshot);
   await writeFile(path.join(evidenceRoot, "stages.json"), JSON.stringify(stages, null, 2));
   process.stderr.write(`${label}: ${result.transaction?.step ?? "current"}\n`);
@@ -281,7 +334,9 @@ try {
     );
     assert.equal((await ledger.read()).registrations.candidate, undefined);
     if (dataId === "probe-fail") {
-      const failed = [...acquired.values()].filter((entry) => entry.home.endsWith("/probe-fail"));
+      const failed = [...acquired.values()].filter(
+        (entry) => path.basename(entry.home) === "probe-fail",
+      );
       assert.equal(failed.length, 1, "probe fault must acquire its own candidate instance");
       assert.throws(() => process.kill(failed[0].instance.pid, 0), { code: "ESRCH" });
     }
@@ -424,6 +479,7 @@ const evidence = {
   allObservedSupervisorsExited: true,
   slotUnchanged: true,
   pids: [...pids],
+  bootSnapshots,
   stages,
 };
 await writeFile(path.join(evidenceRoot, "result.json"), JSON.stringify(evidence, null, 2));

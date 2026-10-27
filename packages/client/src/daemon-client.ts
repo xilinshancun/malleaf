@@ -4161,6 +4161,10 @@ export class DaemonClient {
     return this.lastServerInfoMessage?.features?.malleaf === true;
   }
 
+  supportsMalleafBootDrain(): boolean {
+    return this.lastServerInfoMessage?.features?.malleafBootDrain === true;
+  }
+
   supportsMalleafQuiesceCommit(): boolean {
     return this.lastServerInfoMessage?.features?.malleafQuiesceCommit === true;
   }

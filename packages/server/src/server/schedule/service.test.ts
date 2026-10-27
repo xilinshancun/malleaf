@@ -339,6 +339,40 @@ describe("ScheduleService", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  test("Malleaf boot pause survives startup recovery until explicit admission release", async () => {
+    let runs = 0;
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      runner: async () => {
+        runs += 1;
+        return { agentId: null, output: "ok" };
+      },
+    });
+    const schedule = await service.create({
+      prompt: "wait for selected candidate",
+      cadence: { type: "every", everyMs: 60000 },
+      target: { type: "new-agent", config: { provider: "claude", cwd: tempDir } },
+    });
+    service.pauseForDrain();
+    await service.start();
+    now = new Date("2026-01-01T00:02:00.000Z");
+    try {
+      await service.tick();
+      expect(runs).toBe(0);
+      await expect(service.runOnce(schedule.id)).rejects.toThrow("paused");
+      service.resumeAfterDrain();
+      await service.tick();
+      expect(runs).toBe(1);
+    } finally {
+      await service.stop();
+    }
+  });
+
   test("Malleaf schedule pause waits for accepted ticks and resumes overdue work without restart recovery", async () => {
     const runner = new OverlappingTickRunner();
     const manager = new AgentManager({ logger: createTestLogger() });

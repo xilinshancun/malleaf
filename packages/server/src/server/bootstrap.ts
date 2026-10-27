@@ -163,6 +163,7 @@ import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createMalleafOrchestrationSkills } from "./malleaf/global-integrations.js";
 import { readMalleafRuntimeIdentity } from "./malleaf/runtime-identity.js";
+import { publishBootDrainMarker, restoreBootDrain } from "./malleaf/boot-drain.js";
 import { createQuiesceController } from "./malleaf/quiesce.js";
 import {
   resolveReloadableConfig,
@@ -1430,10 +1431,10 @@ export async function createPaseoDaemon(
     createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
-  await scheduleService.start();
   const quiesce = createQuiesceController({
     agentManager,
     schedules: scheduleService,
+    releaseBootDrain: (drainId) => publishBootDrainMarker(config.paseoHome, drainId),
     pendingDeliveries: () => wsServer?.agentMessages.pendingCount() ?? 0,
     countResources: async () => {
       const terminals = (
@@ -1449,6 +1450,18 @@ export async function createPaseoDaemon(
     },
     onError: (error) => logger.error({ err: error }, "Failed to release Malleaf runtime drain"),
   });
+
+  await restoreBootDrain({
+    home: config.paseoHome,
+    drainId: process.env.MALLEAF_BOOT_DRAIN_ID,
+    adopt: quiesce.adoptBootDrain,
+    onInvalid: (error) =>
+      logger.warn(
+        { err: error },
+        "Invalid boot release marker; keeping candidate admission closed",
+      ),
+  });
+  await scheduleService.start();
 
   agentManager.setAgentArchivedCallback(async (agentId) => {
     try {

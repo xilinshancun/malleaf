@@ -1,5 +1,6 @@
 import {
   DaemonQuiesceRequestSchema,
+  MalleafDrainIdSchema,
   type MalleafQuiesceStatus,
 } from "@getpaseo/protocol/malleaf/quiesce";
 import type { AgentManager } from "../agent/agent-manager.js";
@@ -40,17 +41,19 @@ export function createQuiesceController(options: {
     "beginDrain" | "endDrain" | "isDraining" | "getDrainWork" | "prepareForShutdown"
   >;
   schedules: {
+    pauseForDrain(): void;
     stop(options?: { drainTimeoutMs?: number }): Promise<void>;
     resumeAfterDrain(): void | Promise<void>;
     pendingRuns(): number;
   };
+  releaseBootDrain?(drainId: string): Promise<void>;
   countResources(): Promise<{ terminals: number; scripts: number }>;
   pendingDeliveries(): number;
   onError(error: unknown): void;
   clock?: QuiesceClock;
 }) {
   const clock = options.clock ?? systemClock;
-  let lease: { drainId: string; expiresAt: number } | null = null;
+  let lease: { drainId: string; expiresAt: number | null } | null = null;
   let cancelTimer: (() => void) | undefined;
   let shutdown = false;
   let scheduleError: string | null = null;
@@ -105,6 +108,13 @@ export function createQuiesceController(options: {
       if (!lease) return status();
       if (lease.drainId !== drainId)
         throw new QuiesceError("drain_not_owned", "A different runtime switch owns the drain");
+      if (lease.expiresAt === null) {
+        // The release must survive a supervisor-driven worker restart. Failure
+        // leaves this gate closed; a successful write precedes all admission.
+        if (!options.releaseBootDrain) throw new Error("Boot release storage is unavailable");
+        await options.releaseBootDrain(drainId);
+        if (shutdown) return status();
+      }
       cancelTimer?.();
       cancelTimer = undefined;
       lease = null;
@@ -120,7 +130,7 @@ export function createQuiesceController(options: {
       requireRunning();
       if (!lease || lease.drainId !== drainId || !options.agentManager.isDraining())
         throw new QuiesceError("drain_not_active", "No matching active drain can be committed");
-      if (clock.now() >= lease.expiresAt)
+      if (lease.expiresAt !== null && clock.now() >= lease.expiresAt)
         throw new QuiesceError("drain_timeout", "Drain expired before stop could be committed");
       const work = options.agentManager.getDrainWork();
       if (
@@ -154,6 +164,7 @@ export function createQuiesceController(options: {
       requireRunning();
       if (lease && lease.drainId !== input.drainId)
         throw new QuiesceError("drain_active", "Another runtime switch is draining this daemon");
+      if (lease?.expiresAt === null) return status();
       if (clock.now() >= expiresAt)
         throw new QuiesceError(
           "drain_timeout",
@@ -198,7 +209,18 @@ export function createQuiesceController(options: {
     });
   }
 
+  function adoptBootDrain(drainId: string): void {
+    requireRunning();
+    MalleafDrainIdSchema.parse(drainId);
+    if (!options.releaseBootDrain) throw new Error("Boot drain requires durable release storage");
+    if (lease) throw new QuiesceError("drain_active", "Boot admission is already configured");
+    options.schedules.pauseForDrain();
+    options.agentManager.beginDrain();
+    lease = { drainId, expiresAt: null };
+  }
+
   return {
+    adoptBootDrain,
     begin,
     commit,
     end: (drainId: string) => end(drainId),

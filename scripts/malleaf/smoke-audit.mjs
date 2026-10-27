@@ -16,8 +16,7 @@ export async function bindControllerBuild(manifest) {
   assert.equal(head.trim(), manifest.provenance.sourceCommit);
   const hashes = {};
   for (const file of manifest.files) {
-    if (file.kind !== "file" || !/^packages\/(?:malleaf-controller|server)\/dist\//.test(file.path))
-      continue;
+    if (file.kind !== "file" || !/^packages\/[^/]+\/dist\//.test(file.path)) continue;
     const hash = createHash("sha256")
       .update(await readFile(path.join(repo, file.path)))
       .digest("hex");
