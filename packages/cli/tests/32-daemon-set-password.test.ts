@@ -126,7 +126,7 @@ try {
     };
     assert.strictEqual(error.code, "PASSWORD_TTY_REQUIRED");
     assert.match(error.message, /needs a terminal/);
-    assert.match(error.details, /PASEO_PASSWORD/);
+    assert.match(error.details, /MALLEAF_PASSWORD/);
     await assert.rejects(readFile(join(pipedHome, "config.json"), "utf-8"));
     console.log("✓ piped stdin reports that a terminal is required\n");
   }

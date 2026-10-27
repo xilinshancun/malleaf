@@ -159,6 +159,6 @@ function invalidCredentialFile(): HubCommandError {
 function credentialStorageError(): HubCommandError {
   return new HubCommandError(
     "HUB_CREDENTIALS_UNAVAILABLE",
-    "Could not access the private Hub credential store under PASEO_HOME.",
+    "Could not access the private Hub credential store under the Malleaf daemon home.",
   );
 }

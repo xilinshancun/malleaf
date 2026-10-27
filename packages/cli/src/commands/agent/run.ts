@@ -584,7 +584,7 @@ async function resolveRunWorkspace(
   console.error(`Created workspace ${result.workspace.id} - ${label}`);
   if (result.setupSkippedReason) console.error(result.setupSkippedReason);
   console.error(
-    "Tip: pass --workspace <id> (or set PASEO_WORKSPACE_ID) to run in an existing workspace.",
+    "Tip: pass --workspace <id> (or set MALLEAF_WORKSPACE_ID) to run in an existing workspace.",
   );
   return { id: result.workspace.id, cwd: result.workspace.workspaceDirectory ?? cwd };
 }

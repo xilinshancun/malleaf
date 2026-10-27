@@ -181,8 +181,9 @@ async function waitForDaemonRelayRegistered(offerUrl: string, timeoutMs = 30_000
       timeout: 60_000,
       env: {
         MALLEAF_RELAY_ENABLED: "true",
-        PASEO_RELAY_ENDPOINT: relayEndpoint,
-        PASEO_RELAY_PUBLIC_ENDPOINT: relayEndpoint,
+        MALLEAF_APP_BASE_URL: "https://app.example.test",
+        MALLEAF_RELAY_ENDPOINT: relayEndpoint,
+        MALLEAF_RELAY_PUBLIC_ENDPOINT: relayEndpoint,
       },
     });
 
@@ -191,6 +192,7 @@ async function waitForDaemonRelayRegistered(offerUrl: string, timeoutMs = 30_000
       relayEnabled: true,
       relayEndpoint,
       relayPublicEndpoint: relayEndpoint,
+      appBaseUrl: "https://app.example.test",
       includeQr: false,
     });
     if (!offer.url) throw new Error("generateLocalPairingOffer returned no URL");
@@ -220,7 +222,7 @@ async function waitForDaemonRelayRegistered(offerUrl: string, timeoutMs = 30_000
 
     const relay = await ctx.paseo(["ls", "--json", "--host", offerUrl], {
       timeout: 30_000,
-      env: { PASEO_HOST: offerUrl },
+      env: { MALLEAF_HOST: offerUrl },
     });
     expect(relay.exitCode, `relay ls failed: ${relay.stderr}\nstdout: ${relay.stdout}`).toBe(0);
     const relayAgents = JSON.parse(relay.stdout.trim() || "[]");

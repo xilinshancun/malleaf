@@ -84,7 +84,7 @@ try {
   {
     console.log("Test 4: malleaf ls --json handles errors");
     const result = await runLocalPaseo(["ls", "--json"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     // Should still fail (daemon not running)
     assert.notStrictEqual(result.exitCode, 0, "should fail when daemon not running");
@@ -107,7 +107,7 @@ try {
   {
     console.log("Test 5: malleaf ls -a flag is accepted");
     const result = await runLocalPaseo(["ls", "-a"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     // Will fail due to no daemon, but flag should be parsed without error
     // (no "unknown option" error)
@@ -121,7 +121,7 @@ try {
   {
     console.log("Test 6: malleaf ls -g flag is accepted");
     const result = await runLocalPaseo(["ls", "-g"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     const output = result.stdout + result.stderr;
     assert(!output.includes("unknown option"), "should accept -g flag");
@@ -133,7 +133,7 @@ try {
   {
     console.log("Test 7: malleaf ls -ag combined flags are accepted");
     const result = await runLocalPaseo(["ls", "-ag"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     const output = result.stdout + result.stderr;
     assert(!output.includes("unknown option"), "should accept -ag flags");
@@ -145,7 +145,7 @@ try {
   {
     console.log("Test 8: -q (quiet) flag is accepted");
     const result = await runLocalPaseo(["-q", "ls"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     const output = result.stdout + result.stderr;
     assert(!output.includes("unknown option"), "should accept -q flag");
@@ -157,7 +157,7 @@ try {
   {
     console.log("Test 9: malleaf ls --ui is rejected");
     const result = await runLocalPaseo(["ls", "--ui"], {
-      PASEO_HOST: `localhost:${port}`,
+      MALLEAF_HOST: `localhost:${port}`,
     });
     assert.notStrictEqual(result.exitCode, 0, "should fail for removed --ui flag");
     const output = result.stdout + result.stderr;
@@ -170,7 +170,7 @@ try {
     console.log("Test 10: global --host targets the requested daemon");
     const host = `localhost:${port}`;
     const result = await runLocalPaseo(["--host", host, "ls"], {
-      PASEO_HOST: "localhost:1",
+      MALLEAF_HOST: "localhost:1",
       MALLEAF_DAEMON_HOME: paseoHome,
     });
     const output = result.stdout + result.stderr;

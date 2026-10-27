@@ -76,7 +76,7 @@ async function getPairingOfferUrl(args: {
     relayEndpoint: args.relayEndpoint,
     relayPublicEndpoint: args.relayPublicEndpoint,
     relayRequireProtectedSecurity: args.relayRequireProtectedSecurity,
-    appBaseUrl: args.appBaseUrl,
+    appBaseUrl: args.appBaseUrl ?? "https://app.example.test",
     includeQr: false,
   });
   if (!pairing.url) {

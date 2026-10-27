@@ -62,7 +62,7 @@ function terminalPasswordPrompt(): PromptPassword {
     throw createCommandError(
       "PASSWORD_TTY_REQUIRED",
       "malleaf daemon set-password needs a terminal to read the password",
-      "Run it in an interactive terminal, or set PASEO_PASSWORD in the daemon's environment instead.",
+      "Run it in an interactive terminal, or set MALLEAF_PASSWORD in the daemon's environment instead.",
     );
   }
   return (message) => passwordPrompt({ message });
