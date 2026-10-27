@@ -334,7 +334,7 @@ export async function executeEpochCopy(plan: EpochCopyPlan): Promise<CopiedEpoch
   await mkdir(stage, { mode: 0o700 });
   try {
     await copyEntries(fresh, stage);
-    await writeJsonAtomic(path.join(stage, "config.json"), fresh.config);
+    await writeJsonAtomic({ filename: path.join(stage, "config.json"), value: fresh.config });
     const finalSource = await planEpochCopy(fresh.options);
     if (finalSource.fingerprint !== fresh.fingerprint)
       throw new StorageError("state_conflict", "Epoch source changed during copying");
@@ -349,15 +349,18 @@ export async function executeEpochCopy(plan: EpochCopyPlan): Promise<CopiedEpoch
       size: (await lstat(configFile)).size,
       sha256: await hashFile(configFile),
     });
-    await writeJsonAtomic(path.join(stage, "epoch.json"), {
-      schemaVersion: 1,
-      dataId: fresh.options.dataId,
-      buildIdAtCopy: fresh.options.buildId,
-      copiedFrom: fresh.options.sourceHome,
-      createdAt: new Date().toISOString(),
-      files,
-      shared: fresh.options.shared,
-      excluded: fresh.excluded,
+    await writeJsonAtomic({
+      filename: path.join(stage, "epoch.json"),
+      value: {
+        schemaVersion: 1,
+        dataId: fresh.options.dataId,
+        buildIdAtCopy: fresh.options.buildId,
+        copiedFrom: fresh.options.sourceHome,
+        createdAt: new Date().toISOString(),
+        files,
+        shared: fresh.options.shared,
+        excluded: fresh.excluded,
+      },
     });
     await rename(stage, fresh.destination);
     return {

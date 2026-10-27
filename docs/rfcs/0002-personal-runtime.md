@@ -12,14 +12,16 @@ Build a changed Malleaf daemon, activate the exact tested artifact, and return t
 
 The directory structure and `@getpaseo/*` packages stay in place to retain upstream mergeability. `packages/malleaf-controller` owns the controller and stable runner. The later job/agent and desktop RFCs add conversational entry points and desktop slot loading; this RFC must not label those later features complete.
 
-Fable and root agreed on 2026-10-28 to implement the pure file portions of T1 and T2 on locally accepted foundation commit `a48011a67` while PR #1 runs CI, subsequently fast-forwarded to fixture correction `35d36909f`. Candidate process startup, including the copied-closure acceptance test, remains gated on that CI result. Runtime work is a separate branch and commit series.
+Fable and root agreed on 2026-10-28 to implement the pure file portions of T1 and T2 on the locally accepted RFC-0001 foundation while PR #1 runs CI. The runtime branch now includes foundation correction `80e2743fc`. Candidate process startup, including the copied-closure acceptance test, remains gated on that CI result. Runtime work is a separate branch and commit series.
 
 ## Layout and process ownership
 
 ```text
 MALLEAF_HOME/
   runner/stable/runner.js       last validated, dependency-free bootstrap
-  runner/current.json          current, previous, pending build/data pairs
+  runner/runner.json           fixed control port, init token, initial pair
+  runner/current.json          current, previous, trial build/data pairs
+  runner/controller.json       listener owner's identity; not a file lock
   runner/switch.json           recoverable transaction journal
   versions/<buildId>/          immutable runtime closure and manifest
   data/<dataId>/               one complete daemon home per epoch
@@ -55,6 +57,18 @@ Exclude pid lock, local credential, logs/rotation, sockets, `runtime/`, uploads,
 Copy to `data/<id>.partial`, record provenance and hashes, then atomically rename. Use `lstat`; never follow an escaping link. Preserve internal links by rebasing them into the new epoch. For an unknown external link, stop with an actionable decision rather than silently discard possibly durable user data. The current trusted slot owns the data policy (`malleaf.data-policy.json`); undeclared paths default to copied. Large unknown data needs a copy/share decision before activation. Failed or cancelled staging leaves the previous pair usable. Scan every copied JSON document and the rewritten config for paths into the source epoch; unresolved paths block copying. The scanner currently fails closed on malformed JSON or invalid file URLs; paths embedded in shell commands and home-relative strings require declared migration work. Binary/custom formats and code side effects are not a sandbox boundary. Storage destinations and shared targets reuse RFC-0001’s installed-Paseo path protection. Windows directory symlinks currently require developer mode or symbolic-link privileges; ordinary-user Windows activation is not yet accepted.
 
 Epochs are not automatically removed. Code-only rollback while retaining trial data requires a separate compatibility proof and is deferred. This avoids relying on arbitrary modified code or Zod parsing to promise backward-compatible writes.
+
+### Durable pointer and initialization
+
+`current.json` is the sole commit point. It stores schema/minimum reader/minimum writer versions, a monotonically increasing sequence, current and previous pairs, an optional `trial {pair, switchId, candidateToken, since}`, update time, and writer identity. Beginning a trial leaves current/previous unchanged. Keep atomically promotes the trial, retains the old current as previous, and clears trial. Revert only clears trial. Returning to a previously kept build first clones its retained epoch, then uses the same trial/keep protocol. Current, previous and trial use distinct epochs. No timer implicitly keeps a trial.
+
+Initial publication and forward transitions require complete physical slot/epoch directories within the product home; they verify slot entry hashes and epoch/build identity. Reading an existing pointer and clearing trial do not validate referenced files, so damaged epoch metadata cannot block removing a trial. Keep/revert require both switch identity and candidate token. Full slot verification belongs to activation. The store preserves unknown state fields and accepts a future schema only when its minimum reader version permits this reader; a higher minimum writer version permits inspection but rejects mutations. Writer identity is replaced on each commit. Unsupported or malformed state is never overwritten.
+
+Writes run in one promise queue. Each operation rereads the sequence and exact file digest; an unexpected change poisons that store instance. The controller supplies an ownership guard, checked before reading and immediately before publication. A failed commit may already have reached disk, so it also poisons the instance instead of retrying cached state. `seal()` rejects new operations and waits for accepted operations before the listener can be handed off. The file digest detects external writes; it cannot prevent two writers racing between read and rename. The file layer does not itself provide cross-process exclusion; the exclusive control listener is required before these stores can drive a runtime.
+
+Atomic replacement writes and fsyncs a private temporary file, renames it, then syncs the parent directory on POSIX. Initial publication uses a hard link from that complete temporary file and fails if the destination exists. A filesystem without that primitive receives an explicit failure; there is no partial direct-write fallback. Windows directory fsync is not used.
+
+Initialization will hold its selected loopback listener while publishing `runner.json`, including the exact initial pair. If it crashes before publishing `current.json`, recovery uses that recorded pair rather than new command arguments. Losing initializers do not delete complete epochs; explicit cleanup can reclaim unreferenced artifacts later. Port initialization and listener ownership are not implemented by the pure file store. `epoch.json` is reserved controller metadata inside the epoch; same-user custom code can damage it. Forward transitions then fail closed. Clearing trial remains possible, but this alone does not repair state or prove the old daemon can boot.
 
 ## Drain, switch, and recovery
 
@@ -108,9 +122,11 @@ flowchart LR
 
 ### File-layer implementation evidence
 
-The first implementation covers slot materialization and verification, two-phase epoch planning/copying, and workspace/CI integration. It does not yet implement the pair store, controller lifetime, drain, activation, or desktop loading. T1 and T2 therefore remain in progress.
+The first implementation covers slot materialization and verification, two-phase epoch planning/copying, and workspace/CI integration. The next file-layer slice adds the pair store and create-once JSON publication. Controller lifetime, listener ownership, initialization, drain, activation, and desktop loading remain pending. T1 and T2 therefore remain in progress.
 
 On 2026-10-28, 18 targeted tests passed across `slot/materialize.test.ts`, `data/epoch.test.ts`, and `dependencies.test.ts` (`/tmp/malleaf-storage-review-tests.log`). They cover detached source closure fixtures, entry tampering, directory identity, installed-Paseo protection, unknown data preservation, source changes during planning, absolute paths in custom JSON, and copying between sibling epochs. Controller typecheck/lint and `build:server` passed (`/tmp/malleaf-runtime-{types,lint,server-build}.log`). The existing CI routing contract passed 21 checks (`/tmp/malleaf-runtime-ci-contract.log`). Opus’s second review closed all three P1 findings; the file-layer implementation has no remaining review blocker. A real copied runtime has not been started.
+
+The pointer slice passed 31 targeted checks across those files plus `runner/pointer.test.ts` (`/tmp/malleaf-pointer-final-tests.log`). These include concurrent publication, stale writer detection, lease loss before commit, sealed queues, future reader/writer requirements, cloned rollback epochs, token checks, and clearing a trial after epoch metadata corruption. Full workspace typecheck, lint, server build and controller build passed (`/tmp/malleaf-pointer-{types,lint,server-build,controller-build}.log`). Opus's final pointer review found no remaining blocker. These file tests do not prove process exclusion or runtime recovery.
 
 Unit tests alone do not prove activation. Required process acceptance uses a copied slot and new epoch, confirms runtime build identity and behavior, and proves the previous epoch remains byte-for-byte recoverable after candidate failure. Mock-provider checks and real installed harness checks are reported separately. Local tests remain targeted; full-suite execution belongs to CI.
 

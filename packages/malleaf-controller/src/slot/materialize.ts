@@ -151,7 +151,7 @@ export async function materializeSlot(options: MaterializeOptions): Promise<Mate
       entries: options.entries,
       files,
     });
-    await writeJsonAtomic(path.join(stage, manifestName), manifest);
+    await writeJsonAtomic({ filename: path.join(stage, manifestName), value: manifest });
     await verifyContents(stage, manifest, "full");
     const directory = path.join(versionsRoot, manifest.buildId);
     if (await exists(directory)) {

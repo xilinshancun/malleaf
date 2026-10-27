@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, createReadStream, createWriteStream } from "node:fs";
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 
@@ -10,7 +10,12 @@ export type StorageErrorCode =
   | "incomplete_artifact"
   | "identity_conflict"
   | "epoch_blocked"
-  | "state_conflict";
+  | "state_conflict"
+  | "publication_failed"
+  | "unsupported_schema"
+  | "store_sealed"
+  | "lease_lost"
+  | "invalid_state";
 
 export class StorageError extends Error {
   constructor(
@@ -110,7 +115,19 @@ export async function readJson(filename: string): Promise<unknown> {
   return JSON.parse(await readFile(filename, "utf8"));
 }
 
-export async function writeJsonAtomic(filename: string, value: unknown): Promise<void> {
+interface JsonCommit {
+  filename: string;
+  value: unknown;
+  mode?: "replace" | "publish";
+  beforeCommit?: () => void;
+}
+
+export async function writeJsonAtomic({
+  filename,
+  value,
+  mode = "replace",
+  beforeCommit,
+}: JsonCommit): Promise<void> {
   const directory = path.dirname(filename);
   await mkdir(directory, { recursive: true });
   const temporary = path.join(directory, `.${path.basename(filename)}.${randomUUID()}.partial`);
@@ -122,7 +139,26 @@ export async function writeJsonAtomic(filename: string, value: unknown): Promise
     } finally {
       await handle.close();
     }
-    await rename(temporary, filename);
+    beforeCommit?.();
+    if (mode === "publish") {
+      try {
+        await link(temporary, filename);
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "EEXIST")
+          throw new StorageError("state_conflict", `State already exists: ${filename}`);
+        throw new StorageError("publication_failed", `Cannot publish ${filename}: ${error}`);
+      }
+    } else {
+      await rename(temporary, filename);
+    }
+    if (process.platform !== "win32") {
+      const parent = await open(directory, constants.O_RDONLY);
+      try {
+        await parent.sync();
+      } finally {
+        await parent.close();
+      }
+    }
   } finally {
     await rm(temporary, { force: true });
   }
