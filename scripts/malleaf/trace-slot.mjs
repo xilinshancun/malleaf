@@ -64,7 +64,12 @@ try {
     { cwd: repoRoot, maxBuffer: 32 * 1024 * 1024, env },
   );
   process.stderr.write(result.stderr);
-  const files = result.stdout.trim().split("\n");
+  // nft can mistake project Git operations for a runtime dependency on this
+  // checkout's index. Repository metadata belongs to source, never a slot.
+  const files = result.stdout
+    .trim()
+    .split("\n")
+    .filter((filename) => !filename.split("/").some((segment) => segment.toLowerCase() === ".git"));
   process.stdout.write(`${JSON.stringify({ entries, files }, null, 2)}\n`);
 } finally {
   await rm(home, { recursive: true, force: true });

@@ -100,6 +100,11 @@ async function copyClosure(options: MaterializeOptions, stage: string): Promise<
   // files first so no write is ever redirected through a staged link.
   for (const relative of new Set(options.paths)) {
     relativePath(relative);
+    if (relative.split("/").some((segment) => segment.toLowerCase() === ".git"))
+      throw new StorageError(
+        "unsafe_path",
+        "Repository metadata cannot be included in a runtime slot",
+      );
     if (relative === manifestName)
       throw new StorageError("unsafe_path", "The slot manifest is reserved");
     const source = path.join(sourceRoot, relative);

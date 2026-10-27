@@ -97,6 +97,19 @@ test("missing entries and paths outside the source never publish a slot", async 
   expect(await readdir(options.versionsRoot)).toEqual([]);
 });
 
+test.each([".git/index", ".GIT/index"])(
+  "runtime artifacts cannot bundle %s metadata discovered by tracing",
+  async (metadataPath) => {
+    const options = await fixture();
+    await mkdir(path.join(options.sourceRoot, path.dirname(metadataPath)));
+    await writeFile(path.join(options.sourceRoot, metadataPath), "private repository metadata");
+    await expect(
+      materializeSlot({ ...options, paths: [...options.paths, metadataPath] }),
+    ).rejects.toMatchObject({ code: "unsafe_path" });
+    expect(await readdir(options.versionsRoot)).toEqual([]);
+  },
+);
+
 test("workspace links resolve only within the copied slot", async () => {
   const options = await fixture();
   await mkdir(path.join(options.sourceRoot, "node_modules/@getpaseo"), { recursive: true });
