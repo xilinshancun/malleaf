@@ -20,7 +20,7 @@ export type MalleafQuiesceStatus = z.infer<typeof MalleafQuiesceStatusSchema>;
 export const DaemonQuiesceRequestSchema = z.object({
   type: z.literal("daemon.quiesce.request"),
   requestId: z.string(),
-  action: z.enum(["begin", "end", "status"]),
+  action: z.enum(["begin", "end", "status", "commit"]),
   drainId: MalleafDrainIdSchema.optional(),
   deadlineMs: z.number().int().min(1000).max(900_000).optional(),
 });

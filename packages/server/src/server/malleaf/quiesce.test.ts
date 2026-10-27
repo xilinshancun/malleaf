@@ -16,24 +16,36 @@ class ManualClock implements QuiesceClock {
   }
 }
 
-function fixture(overrides: { start?: () => Promise<void>; stop?: () => Promise<void> } = {}) {
+function fixture(
+  overrides: { start?: () => Promise<void>; stop?: () => Promise<void>; idle?: boolean } = {},
+) {
   const clock = new ManualClock();
   const calls: string[] = [];
   const errors: unknown[] = [];
+  let draining = false;
+  const work = {
+    running: overrides.idle ? [] : ["pending-turn"],
+    pendingPermissions: [] as string[],
+    pendingRegistrations: overrides.idle ? 0 : 1,
+    pendingAdmissions: 0,
+  };
+  const pending = { deliveries: 0, schedules: 0 };
   const controller = createQuiesceController({
     agentManager: {
       beginDrain: () => {
+        draining = true;
         calls.push("drain");
       },
       endDrain: () => {
+        draining = false;
         calls.push("accept");
       },
-      getDrainWork: () => ({
-        running: ["pending-turn"],
-        pendingPermissions: [],
-        pendingRegistrations: 1,
-        pendingAdmissions: 0,
-      }),
+      isDraining: () => draining,
+      prepareForShutdown: () => {
+        draining = false;
+        calls.push("shutdown");
+      },
+      getDrainWork: () => work,
     },
     schedules: {
       stop: async () => {
@@ -44,16 +56,26 @@ function fixture(overrides: { start?: () => Promise<void>; stop?: () => Promise<
         calls.push("resume schedules");
         await overrides.start?.();
       },
-      pendingRuns: () => 0,
+      pendingRuns: () => pending.schedules,
     },
-    pendingDeliveries: () => 0,
+    pendingDeliveries: () => pending.deliveries,
     countResources: async () => ({ terminals: 2, scripts: 1 }),
     onError: (error) => {
       errors.push(error);
     },
     clock,
   });
-  return { controller, clock, calls, errors };
+  return {
+    controller,
+    clock,
+    calls,
+    errors,
+    work,
+    pending,
+    unfreeze: () => {
+      draining = false;
+    },
+  };
 }
 const drainId = "00000000-0000-4000-8000-000000000001";
 const anotherId = "00000000-0000-4000-8000-000000000002";
@@ -179,4 +201,66 @@ test("schedule waiting consumes the deadline without ever freezing admission on 
   );
   expect(current.calls).toEqual(["pause schedules", "resume schedules"]);
   expect(await current.controller.status()).toMatchObject({ state: "accepting", drainId: null });
+});
+
+test("commit freezes admission permanently before asynchronous resource reporting", async () => {
+  const { controller, clock, calls, errors } = fixture({ idle: true });
+  await controller.begin({ drainId, deadlineMs: 1000 });
+  const expiry = [...clock.callbacks][0];
+  const committing = controller.commit(drainId);
+  expiry(); // Expiry queued after commit must not restore admission.
+  expect(await committing).toMatchObject({ state: "shutdown", drainId, expiresAt: 1000 });
+  await expect(controller.end(drainId)).rejects.toThrow("daemon_stopping");
+  await expect(controller.begin({ drainId, deadlineMs: 1000 })).rejects.toThrow("daemon_stopping");
+  clock.time = 1001;
+  clock.expire();
+  await controller.dispose();
+  expect(calls.filter((call) => call === "shutdown")).toHaveLength(1);
+  expect(calls).not.toContain("accept");
+  expect(calls).not.toContain("resume schedules");
+  expect(errors).toEqual([]);
+});
+
+test.each(["running", "permissions", "registrations", "admissions", "deliveries", "schedules"])(
+  "commit refuses outstanding %s and leaves the renewable lease intact",
+  async (barrier) => {
+    const { controller, clock, calls, work, pending } = fixture({ idle: true });
+    await controller.begin({ drainId, deadlineMs: 1000 });
+    if (barrier === "running") work.running.push("agent");
+    if (barrier === "permissions") work.pendingPermissions.push("agent");
+    if (barrier === "registrations") work.pendingRegistrations = 1;
+    if (barrier === "admissions") work.pendingAdmissions = 1;
+    if (barrier === "deliveries") pending.deliveries = 1;
+    if (barrier === "schedules") pending.schedules = 1;
+    const timer = [...clock.callbacks][0];
+    await expect(controller.commit(drainId)).rejects.toThrow("drain_busy");
+    expect(calls).not.toContain("shutdown");
+    expect([...clock.callbacks]).toEqual([timer]);
+    expect(await controller.status()).toMatchObject({ state: "draining", expiresAt: 1000 });
+    await controller.dispose();
+  },
+);
+
+test("commit rejects expired, wrong-owner and externally ended drains without freezing", async () => {
+  const { controller, clock, calls, unfreeze } = fixture({ idle: true });
+  await controller.begin({ drainId, deadlineMs: 1000 });
+  await expect(controller.commit(anotherId)).rejects.toThrow("drain_not_active");
+  clock.time = 1001; // Timer has not run yet; the deadline itself is authoritative.
+  await expect(controller.commit(drainId)).rejects.toThrow("drain_timeout");
+  expect(calls).not.toContain("shutdown");
+  await controller.begin({ drainId, deadlineMs: 1000 });
+  unfreeze();
+  await expect(controller.commit(drainId)).rejects.toThrow("drain_not_active");
+  expect(calls).not.toContain("shutdown");
+  await controller.dispose();
+});
+
+test("expiry queued before commit wins and cannot be turned into an unowned stop", async () => {
+  const { controller, clock, calls } = fixture({ idle: true });
+  await controller.begin({ drainId, deadlineMs: 1000 });
+  clock.expire();
+  await expect(controller.commit(drainId)).rejects.toThrow("drain_not_active");
+  expect(calls).toContain("accept");
+  expect(calls).not.toContain("shutdown");
+  expect(await controller.status()).toMatchObject({ state: "accepting" });
 });

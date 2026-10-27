@@ -11,7 +11,13 @@ export interface QuiesceClock {
 
 export class QuiesceError extends Error {
   constructor(
-    readonly code: "drain_active" | "drain_not_owned" | "drain_timeout" | "daemon_stopping",
+    readonly code:
+      | "drain_active"
+      | "drain_not_owned"
+      | "drain_not_active"
+      | "drain_busy"
+      | "drain_timeout"
+      | "daemon_stopping",
     message: string,
   ) {
     super(`${code}: ${message}`);
@@ -29,7 +35,10 @@ const systemClock: QuiesceClock = {
 };
 
 export function createQuiesceController(options: {
-  agentManager: Pick<AgentManager, "beginDrain" | "endDrain" | "getDrainWork">;
+  agentManager: Pick<
+    AgentManager,
+    "beginDrain" | "endDrain" | "isDraining" | "getDrainWork" | "prepareForShutdown"
+  >;
   schedules: {
     stop(options?: { drainTimeoutMs?: number }): Promise<void>;
     resumeAfterDrain(): void | Promise<void>;
@@ -90,6 +99,7 @@ export function createQuiesceController(options: {
 
   function end(drainId: string, expiredLease?: typeof lease): Promise<MalleafQuiesceStatus> {
     return serialize(async () => {
+      if (expiredLease && shutdown) return status();
       requireRunning();
       if (expiredLease && lease !== expiredLease) return status();
       if (!lease) return status();
@@ -101,6 +111,33 @@ export function createQuiesceController(options: {
       options.agentManager.endDrain();
       // Never apply boot-time interrupted-run recovery to a live paused service.
       await resumeSchedules();
+      return status();
+    });
+  }
+
+  function commit(drainId: string): Promise<MalleafQuiesceStatus> {
+    return serialize(async () => {
+      requireRunning();
+      if (!lease || lease.drainId !== drainId || !options.agentManager.isDraining())
+        throw new QuiesceError("drain_not_active", "No matching active drain can be committed");
+      if (clock.now() >= lease.expiresAt)
+        throw new QuiesceError("drain_timeout", "Drain expired before stop could be committed");
+      const work = options.agentManager.getDrainWork();
+      if (
+        work.running.length ||
+        work.pendingPermissions.length ||
+        work.pendingRegistrations ||
+        work.pendingAdmissions ||
+        options.pendingDeliveries() ||
+        options.schedules.pendingRuns()
+      )
+        throw new QuiesceError("drain_busy", "Accepted work must finish before committing stop");
+      // No await between the authoritative counters and the permanent admission
+      // freeze. Async terminal/script counts are diagnostics, not this barrier.
+      options.agentManager.prepareForShutdown();
+      shutdown = true;
+      cancelTimer?.();
+      cancelTimer = undefined;
       return status();
     });
   }
@@ -163,6 +200,7 @@ export function createQuiesceController(options: {
 
   return {
     begin,
+    commit,
     end: (drainId: string) => end(drainId),
     status,
     dispose() {

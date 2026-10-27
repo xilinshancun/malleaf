@@ -22,6 +22,9 @@ export function beginMalleafDrain(manager: object): void {
 export function endMalleafDrain(manager: object): void {
   draining.delete(manager);
 }
+export function isMalleafDraining(manager: object): boolean {
+  return draining.has(manager);
+}
 export function hasMalleafAdmission(manager: object, agentId?: string): boolean {
   const admission = context.getStore();
   return (

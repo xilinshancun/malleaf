@@ -86,6 +86,8 @@ describe("DaemonSession", () => {
       agentManager: {
         beginDrain() {},
         endDrain() {},
+        isDraining: () => true,
+        prepareForShutdown() {},
         getDrainWork: () => ({
           running: [],
           pendingPermissions: [],
@@ -144,6 +146,23 @@ describe("DaemonSession", () => {
         type: "daemon.quiesce.response",
         payload: { requestId: "right-end", status: { state: "accepting" } },
       });
+      await subsystem.handleQuiesceRequest({ ...begin, requestId: "rebegin" });
+      const commit = { ...begin, requestId: "commit", action: "commit" as const };
+      expect(SessionInboundMessageSchema.parse(commit)).toEqual(commit);
+      await delivery.request(source, commit, async () => {
+        await subsystem.handleQuiesceRequest(commit);
+        expect(delivery.reply(emitted[4])).toBe(true);
+      });
+      expect(SessionOutboundMessageSchema.parse(emitted[4])).toMatchObject({
+        type: "daemon.quiesce.response",
+        payload: { requestId: "commit", status: { state: "shutdown", drainId: begin.drainId } },
+      });
+      await subsystem.handleQuiesceRequest({
+        ...begin,
+        requestId: "end-after-commit",
+        action: "end",
+      });
+      expect(emitted[5]).toMatchObject({ type: "rpc_error", payload: { code: "daemon_stopping" } });
     } finally {
       await delivery.close();
       await quiesce.dispose();

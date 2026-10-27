@@ -1716,6 +1716,7 @@ test("Malleaf drain completes accepted creation, refuses new work, and cannot un
   const creation = manager.createAgent(config, undefined, { workspaceId: undefined });
   await client.waitForCreationToStart();
   manager.beginDrain();
+  expect(manager.isDraining()).toBe(true);
   expect(manager.getDrainWork().pendingRegistrations).toBe(1);
   await expect(manager.createAgent(config, undefined, { workspaceId: undefined })).rejects.toThrow(
     "draining for a runtime switch",
@@ -1735,6 +1736,7 @@ test("Malleaf drain completes accepted creation, refuses new work, and cannot un
   manager.endDrain();
   await drainAsyncGenerator(manager.streamAgent(agent.id, "after cancellation"));
   manager.prepareForShutdown();
+  expect(manager.isDraining()).toBe(false);
   manager.endDrain();
   await expect(manager.createAgent(config, undefined, { workspaceId: undefined })).rejects.toThrow(
     "shutting down",

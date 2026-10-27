@@ -4161,11 +4161,17 @@ export class DaemonClient {
     return this.lastServerInfoMessage?.features?.malleaf === true;
   }
 
+  supportsMalleafQuiesceCommit(): boolean {
+    return this.lastServerInfoMessage?.features?.malleafQuiesceCommit === true;
+  }
+
   async quiesceDaemon(
     input: Omit<DaemonQuiesceRequest, "type" | "requestId">,
   ): Promise<MalleafQuiesceStatus> {
     if (!this.supportsMalleaf())
       throw new Error("Update the host to a Malleaf version supporting runtime switching.");
+    if (input.action === "commit" && !this.supportsMalleafQuiesceCommit())
+      throw new Error("Update the host to support atomic Malleaf drain commit.");
     const requestId = this.createRequestId();
     const message = DaemonQuiesceRequestSchema.parse({
       ...input,

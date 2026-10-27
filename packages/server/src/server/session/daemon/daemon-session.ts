@@ -331,11 +331,14 @@ export class DaemonSession {
       let status;
       if (msg.action === "status") status = await quiesce.status();
       else {
-        if (!msg.drainId) throw new Error("A drainId is required for begin and end");
-        status =
-          msg.action === "begin"
-            ? await quiesce.begin({ drainId: msg.drainId, deadlineMs: msg.deadlineMs ?? 60_000 })
-            : await quiesce.end(msg.drainId);
+        if (!msg.drainId) throw new Error("A drainId is required for begin, end and commit");
+        if (msg.action === "begin")
+          status = await quiesce.begin({
+            drainId: msg.drainId,
+            deadlineMs: msg.deadlineMs ?? 60_000,
+          });
+        else if (msg.action === "commit") status = await quiesce.commit(msg.drainId);
+        else status = await quiesce.end(msg.drainId);
       }
       this.host.emit({
         type: "daemon.quiesce.response",

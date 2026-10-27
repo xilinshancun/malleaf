@@ -3654,6 +3654,8 @@ export const ServerInfoStatusPayloadSchema = z
       .object({
         // COMPAT(malleafQuiesce): added in Malleaf 0.1.0; keep optional for upstream hosts.
         malleaf: z.boolean().optional(),
+        // COMPAT(malleafQuiesceCommit): added in Malleaf 0.1.0; keep optional for older personal slots.
+        malleafQuiesceCommit: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.
         agentRequestReceipts: z.boolean().optional(),
         // COMPAT(workspaceRequestReceipts): added in v0.8.0; remove gate after 2027-03-07.

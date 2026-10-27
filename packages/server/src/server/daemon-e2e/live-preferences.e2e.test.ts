@@ -19,6 +19,7 @@ test("Malleaf quiesce replies reach a modern client and expiry restores admissio
   try {
     await client.connect();
     expect(client.supportsMalleaf()).toBe(true);
+    expect(client.supportsMalleafQuiesceCommit()).toBe(true);
     expect(await client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).toMatchObject({
       state: "accepting",
       pendingAdmissions: 0,
@@ -52,6 +53,33 @@ test("Malleaf quiesce replies reach a modern client and expiry restores admissio
       .toBe("accepting");
     expect(await client.createAgent({ provider: "codex", cwd: daemon.staticDir })).toHaveProperty(
       "id",
+    );
+    const stopDrainId = randomUUID();
+    await client.quiesceDaemon({ action: "begin", drainId: stopDrainId, deadlineMs: 10_000 });
+    await expect
+      .poll(
+        async () => {
+          const status = await client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+          return (
+            status.running.length +
+            status.pendingPermissions.length +
+            status.pendingAdmissions +
+            status.pendingRegistrations +
+            status.pendingDeliveries +
+            status.pendingScheduleRuns
+          );
+        },
+        { timeout: 5000 },
+      )
+      .toBe(0);
+    expect(
+      await client.quiesceDaemon({ action: "commit", drainId: stopDrainId, deadlineMs: 1000 }),
+    ).toMatchObject({ state: "shutdown", drainId: stopDrainId, running: [] });
+    await expect(
+      client.quiesceDaemon({ action: "end", drainId: stopDrainId, deadlineMs: 1000 }),
+    ).rejects.toThrow("daemon_stopping");
+    await expect(client.createAgent({ provider: "codex", cwd: daemon.staticDir })).rejects.toThrow(
+      /shutting down/,
     );
   } finally {
     await client.close();

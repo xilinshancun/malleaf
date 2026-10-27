@@ -3,6 +3,7 @@ import {
   assertMalleafAdmission,
   beginMalleafDrain,
   endMalleafDrain,
+  isMalleafDraining,
   pendingMalleafAdmissions,
 } from "../malleaf/admission.js";
 import type { AgentToolResult } from "@getpaseo/plugin/server";
@@ -906,6 +907,10 @@ export class AgentManager {
 
   endDrain(): void {
     endMalleafDrain(this);
+  }
+
+  isDraining(): boolean {
+    return this.acceptingAgentRegistrations && isMalleafDraining(this);
   }
 
   getDrainWork(): {
