@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This is Malleaf, an independently maintained derivative of Paseo. Read [docs/malleaf.md](docs/malleaf.md) for the product scope and [UPSTREAM.md](UPSTREAM.md) for integration constraints. The upstream architecture and development rules below still apply. Malleaf-specific implementation is under development.
+
 Paseo is a mobile app for monitoring and controlling your local AI coding agents from anywhere. Your dev environment, in your pocket. Connects directly to your actual development environment — your code stays on your machine.
 
 **Supported agents:** Claude Code, Codex, GitHub Copilot, OpenCode, Pi, Antigravity, and Muse Code.
@@ -23,6 +25,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 
 | Doc                                                                  | What's in it                                                                                                                   |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| [docs/malleaf.md](docs/malleaf.md)                                   | Malleaf product scope, personal versions, and first acceptance target                                                          |
 | [docs/product.md](docs/product.md)                                   | What Paseo is, who it's for, where it's going                                                                                  |
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
