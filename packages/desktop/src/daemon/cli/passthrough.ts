@@ -2,7 +2,18 @@ import { pathToFileURL } from "node:url";
 import { resolvePassthroughCliEntrypoint } from "./entrypoints.js";
 
 const DESKTOP_CLI_ENV = "PASEO_DESKTOP_CLI";
-const IGNORED_ARG_PREFIXES = ["-psn_", "--class=", "--no-sandbox", "--remote-debugging-port="];
+const IGNORED_ARG_PREFIXES = [
+  "-psn_",
+  "--class=",
+  "--no-sandbox",
+  "--remote-debugging-port=",
+  // MALLEAF: native profile isolation flags may follow the application entry.
+  "--user-data-dir=",
+  "--lang=",
+  "--password-store=",
+  "--use-mock-keychain",
+  "--remote-debugging-address=",
+];
 
 export type PassthroughCliRunner = (argv: string[]) => Promise<number>;
 
