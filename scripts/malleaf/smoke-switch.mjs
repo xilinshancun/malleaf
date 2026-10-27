@@ -79,13 +79,13 @@ await writeFile(
 );
 const quiesce = path.join(faultSource, "packages/server/dist/server/server/malleaf/quiesce.js");
 const quiesceSource = await readFile(quiesce, "utf8");
-assert.ok(quiesceSource.includes("let shutdown = false;"));
+assert.ok(quiesceSource.includes('if (shutdown) state = "shutdown";'));
 await chmod(quiesce, 0o600);
 await writeFile(
   quiesce,
   quiesceSource.replace(
-    "let shutdown = false;",
-    'let shutdown = process.env.MALLEAF_DAEMON_HOME?.endsWith("probe-fail") === true;',
+    'if (shutdown) state = "shutdown";',
+    'if (shutdown || process.env.MALLEAF_DAEMON_HOME?.endsWith("probe-fail")) state = "shutdown";',
   ),
 );
 const faultSlot = await variant("0.1.0.switch-fault-fixture", faultSource);
