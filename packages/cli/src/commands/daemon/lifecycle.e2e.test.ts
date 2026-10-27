@@ -170,7 +170,7 @@ test.each(["Paseo", "Malleaf"])(
             [
               "--conditions=source",
               "--import",
-              path.join(repo, "node_modules/tsx/dist/loader.mjs"),
+              pathToFileURL(path.join(repo, "node_modules/tsx/dist/loader.mjs")).href,
               path.join(repo, "scripts/malleaf/development-environment.mts"),
               repo,
               "--listen",

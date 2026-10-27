@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { resolvePaseoHome } from "./paseo-home.js";
@@ -191,7 +192,7 @@ describe("Malleaf home isolation", () => {
         [
           "--conditions=source",
           "--import",
-          path.join(repository, "node_modules/tsx/dist/loader.mjs"),
+          pathToFileURL(path.join(repository, "node_modules/tsx/dist/loader.mjs")).href,
           path.join(repository, "scripts/malleaf/development-environment.mts"),
           checkout,
           "--prepare",

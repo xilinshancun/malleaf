@@ -1,5 +1,5 @@
 import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ export interface IsolatedHostDaemon {
   serverId: string;
   port: number;
   paseoHome: string;
+  osHome: string;
   getPid(): number | undefined;
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -101,7 +102,8 @@ export async function startIsolatedHostDaemon(
 
   const paseoHome =
     options.paseoHome ?? (await mkdtemp(path.join(tmpdir(), "paseo-e2e-secondary-host-")));
-  const osHome = await mkdtemp(path.join(tmpdir(), "malleaf-e2e-os-home-"));
+  const temporaryOsHome = await mkdtemp(path.join(tmpdir(), "malleaf-e2e-os-home-"));
+  const osHome = await realpath(temporaryOsHome);
   let publishedPackageRoot: string | null = null;
   if (options.publishedVersion) {
     publishedPackageRoot = await mkdtemp(path.join(tmpdir(), "paseo-e2e-published-server-"));
@@ -224,6 +226,7 @@ export async function startIsolatedHostDaemon(
     serverId,
     port,
     paseoHome,
+    osHome,
     getPid: () => child.pid,
     restart: async () => {
       if (closed) throw new Error(`Cannot restart closed isolated daemon ${serverId}`);

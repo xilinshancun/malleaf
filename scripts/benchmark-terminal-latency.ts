@@ -1,7 +1,7 @@
 /**
  * Reproducible terminal latency benchmark (Node-only, isolated daemon).
  *
- * Boots its OWN isolated daemon subprocess (fresh mkdtemp PASEO_HOME, random
+ * Boots its OWN isolated daemon subprocess (fresh temporary Malleaf home, random
  * port) — it NEVER touches the developer daemon on port 6767 — and measures:
  *   A) terminal echo latency  (single-byte input -> first echoed output frame)
  *   B) terminal output jitter (inter-frame gaps while a command drains ~2MB)
@@ -171,6 +171,7 @@ interface BootedDaemon {
   child: ChildProcess;
   port: number;
   paseoHome: string;
+  runtimeRoot: string;
   pid: number;
 }
 
@@ -179,22 +180,42 @@ async function bootDaemon(): Promise<BootedDaemon> {
   if (port === 6767) {
     throw new Error("Refusing to use port 6767 (the developer daemon)");
   }
-  const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-bench-home-"));
-  const tsxBin = execSync("which tsx").toString().trim();
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "malleaf-bench-"));
+  const paseoHome = path.join(runtimeRoot, "daemon");
+  const osHome = path.join(runtimeRoot, "home");
+  const codexHome = path.join(osHome, ".codex");
+  const claudeHome = path.join(osHome, ".claude");
+  await Promise.all(
+    [paseoHome, codexHome, claudeHome].map((directory) => mkdir(directory, { recursive: true })),
+  );
 
-  const child = spawn(tsxBin, ["scripts/supervisor-entrypoint.ts", "--dev"], {
-    cwd: SERVER_DIR,
-    env: {
-      ...process.env,
-      PASEO_HOME: paseoHome,
-      PASEO_SERVER_ID: "srv_terminal_bench",
-      PASEO_LISTEN: `127.0.0.1:${port}`,
-      PASEO_NODE_ENV: "development",
-      NODE_ENV: "development",
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "scripts/supervisor-entrypoint.ts", "--dev"],
+    {
+      cwd: SERVER_DIR,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !key.startsWith("PASEO_") && !key.startsWith("MALLEAF_"),
+          ),
+        ),
+        HOME: osHome,
+        USERPROFILE: osHome,
+        CODEX_HOME: codexHome,
+        CLAUDE_CONFIG_DIR: claudeHome,
+        MALLEAF_HOME: path.join(runtimeRoot, "product"),
+        MALLEAF_DAEMON_HOME: paseoHome,
+        MALLEAF_SERVER_ID: "srv_terminal_bench",
+        MALLEAF_LISTEN: `127.0.0.1:${port}`,
+        MALLEAF_NODE_ENV: "development",
+        MALLEAF_TEST: "1",
+        NODE_ENV: "development",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
     },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-  });
+  );
 
   child.stdout?.on("data", (data: Buffer) => {
     for (const line of data.toString().split("\n")) {
@@ -210,7 +231,7 @@ async function bootDaemon(): Promise<BootedDaemon> {
   });
 
   await waitForPort(port, child, 30_000);
-  return { child, port, paseoHome, pid: child.pid ?? -1 };
+  return { child, port, paseoHome, runtimeRoot, pid: child.pid ?? -1 };
 }
 
 async function loadDaemonClientCtor(): Promise<DaemonClientCtor> {
@@ -667,7 +688,7 @@ function getCommitHash(): string {
 async function main(): Promise<void> {
   const commit = getCommitHash();
   console.log(`Terminal latency benchmark — commit ${commit}`);
-  console.log("Booting isolated daemon (random port, fresh PASEO_HOME)...");
+  console.log("Booting isolated daemon (random port, fresh Malleaf home)...");
 
   let daemon: BootedDaemon | null = null;
   let client: DaemonClientLike | null = null;
@@ -749,7 +770,7 @@ async function main(): Promise<void> {
       if (daemon.child.exitCode === null && daemon.child.signalCode === null) {
         daemon.child.kill("SIGKILL");
       }
-      await rm(daemon.paseoHome, { recursive: true, force: true }).catch(() => undefined);
+      await rm(daemon.runtimeRoot, { recursive: true, force: true }).catch(() => undefined);
     }
     if (workspaceDir) {
       await rm(workspaceDir, { recursive: true, force: true }).catch(() => undefined);

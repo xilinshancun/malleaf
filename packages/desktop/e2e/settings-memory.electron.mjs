@@ -55,7 +55,7 @@ async function openSettingsDestination(page, title) {
 }
 
 async function rotateSettings(page) {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator('[data-testid="sidebar-settings"]:visible').first().click();
   await page.locator('[data-testid="settings-sidebar"]:visible').waitFor({ state: "visible" });
 
   for (const title of SETTINGS_DESTINATIONS) {

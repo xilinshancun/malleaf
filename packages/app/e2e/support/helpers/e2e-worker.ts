@@ -207,6 +207,7 @@ export async function startE2EWorker(
     process.env.E2E_DAEMON_PORT = String(daemon.port);
     process.env.E2E_SERVER_ID = daemon.serverId;
     process.env.E2E_PASEO_HOME = daemon.paseoHome;
+    process.env.E2E_DAEMON_OS_HOME = daemon.osHome;
     process.env.E2E_EDITOR_RECORD_PATH = editorRecordPath;
     delete process.env.E2E_RELAY_PORT;
     delete process.env.E2E_RELAY_DAEMON_PUBLIC_KEY;
