@@ -47,7 +47,12 @@ const runtimeEntries = new Set([
   "epoch.json",
 ]);
 export function isRuntimeEntry(name: string): boolean {
-  return runtimeEntries.has(name) || name === "daemon.log" || name.startsWith("daemon.log.");
+  return (
+    runtimeEntries.has(name) ||
+    name === "daemon.log" ||
+    name.startsWith("daemon.log.") ||
+    /^\d{8}-\d{4}-\d+-daemon\.log$/.test(name)
+  );
 }
 
 export interface SharedDirectories {

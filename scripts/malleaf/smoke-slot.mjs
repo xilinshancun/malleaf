@@ -15,11 +15,14 @@ import { preparePreflight } from "../../packages/malleaf-controller/dist/runtime
 import { launchRuntime } from "../../packages/malleaf-controller/dist/runtime/daemon.js";
 import { acquireControlLease } from "../../packages/malleaf-controller/dist/runner/lease.js";
 import { verifySlot } from "../../packages/malleaf-controller/dist/slot/materialize.js";
+import { exerciseMockDrain } from "./smoke-drain.mjs";
 
-if (!process.argv[2]) throw new Error("Usage: node scripts/malleaf/smoke-slot.mjs <physical-slot>");
+if (!process.argv[2])
+  throw new Error("Usage: node scripts/malleaf/smoke-slot.mjs <physical-slot> [--mock-turn]");
 const directory = path.resolve(process.argv[2]);
 const buildId = path.basename(directory);
-const prepared = await preparePreflight({ slotDirectory: directory });
+const mockProvider = process.argv.includes("--mock-turn");
+const prepared = await preparePreflight({ slotDirectory: directory, mockProvider });
 const evidenceRoot = await mkdtemp(path.join(os.tmpdir(), "malleaf-slot-evidence-"));
 prepared.env.NODE_DEBUG = "esm,module";
 prepared.env.NODE_V8_COVERAGE = path.join(prepared.root, "coverage");
@@ -68,6 +71,9 @@ try {
     await readFile(path.join(directory, "packages/server/package.json"), "utf8"),
   );
   assert.equal(info.version, packageInfo.version);
+  const mockDrain = mockProvider
+    ? await exerciseMockDrain(runtime.client, prepared.root)
+    : undefined;
   const initial = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
   assert.equal(initial.state, "accepting");
   const drainId = randomUUID();
@@ -141,6 +147,7 @@ try {
     wrongDrainRejected: true,
     abortedInstance,
     abortCleaned: true,
+    mockDrain,
   };
 } finally {
   try {

@@ -174,3 +174,17 @@ test("an existing epoch can be copied into a sibling epoch", async () => {
   const copied = await executeEpochCopy(await planEpochCopy({ ...options, sourceHome: oldEpoch }));
   expect(await readFile(path.join(copied.directory, "server-id"), "utf8")).toBe("same-server");
 });
+
+test("excludes date-prefixed daemon rotations without dropping similarly named user files", async () => {
+  const options = await fixture();
+  const runtimeLogs = ["daemon.log", "daemon.log.txt", "20261028-0554-01-daemon.log"];
+  const durable = ["20261028-custom-daemon.log", "my-daemon.log", "20261028-0554-01-notes.log"];
+  for (const name of [...runtimeLogs, ...durable])
+    await writeFile(path.join(options.sourceHome, name), name);
+  const epoch = await executeEpochCopy(await planEpochCopy(options));
+  const names = await readdir(epoch.directory);
+  for (const name of runtimeLogs) expect(names).not.toContain(name);
+  for (const name of durable) expect(names).toContain(name);
+  for (const name of runtimeLogs)
+    expect(await readFile(path.join(options.sourceHome, name), "utf8")).toBe(name);
+});

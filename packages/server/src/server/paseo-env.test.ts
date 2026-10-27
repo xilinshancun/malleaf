@@ -1,4 +1,8 @@
 import { describe, expect, test } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { MALLEAF_RUNTIME_CONTROL_KEYS } from "@getpaseo/protocol/malleaf/product-identity";
 import {
   buildSelfNodeCommand,
@@ -73,6 +77,74 @@ describe("paseo env contract", () => {
     expect(env.CUSTOM).toBe("value");
     expect(env.NODE_ENV).toBe("development");
     expect(env.PATH).toBe("/custom/bin");
+  });
+
+  test("restores host Node settings only for external children and retains explicit overlays", () => {
+    const managed = {
+      ...baseEnv,
+      NODE_OPTIONS: "--no-global-search-paths",
+      NODE_PATH: "",
+      MALLEAF_HOST_NODE_OPTIONS: "--max-old-space-size=2048 --use-openssl-ca",
+      MALLEAF_HOST_NODE_PATH: "/host/node_modules",
+    };
+    expect(createPaseoInternalEnv(managed)).toEqual(managed);
+    const external = createExternalProcessEnv(managed);
+    expect(external.NODE_OPTIONS).toBe(managed.MALLEAF_HOST_NODE_OPTIONS);
+    expect(external.NODE_PATH).toBe(managed.MALLEAF_HOST_NODE_PATH);
+    expect(external.MALLEAF_HOST_NODE_OPTIONS).toBeUndefined();
+    expect(external.MALLEAF_HOST_NODE_PATH).toBeUndefined();
+    expect(
+      createExternalProcessEnv(managed, { NODE_OPTIONS: "--trace-warnings" }).NODE_OPTIONS,
+    ).toBe("--trace-warnings");
+    expect(createExternalProcessEnv(managed, { NODE_PATH: undefined }).NODE_PATH).toBeUndefined();
+    expect(managed.NODE_OPTIONS).toBe("--no-global-search-paths");
+  });
+
+  test("does not leak the slot's Node restrictions when the host had no overrides", () => {
+    const external = createExternalProcessEnv({
+      NODE_OPTIONS: "--no-global-search-paths",
+      NODE_PATH: "",
+      MALLEAF_HOST_NODE_OPTIONS: "",
+      MALLEAF_HOST_NODE_PATH: "",
+    });
+    expect(external.NODE_OPTIONS).toBeUndefined();
+    expect(external.NODE_PATH).toBeUndefined();
+    expect(createExternalProcessEnv({ NODE_OPTIONS: "--trace-warnings" }).NODE_OPTIONS).toBe(
+      "--trace-warnings",
+    );
+  });
+
+  test("an external Node child can load the host preload while an internal child cannot", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "malleaf-node-env-"));
+    try {
+      const preload = path.join(root, "host-preload.cjs");
+      await writeFile(preload, "process.env.MALLEAF_NODE_TEST_PRELOADED = 'yes';");
+      const managed = {
+        ...process.env,
+        NODE_OPTIONS: "--no-global-search-paths",
+        NODE_PATH: "",
+        MALLEAF_HOST_NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
+        MALLEAF_HOST_NODE_PATH: path.join(root, "host-modules"),
+      };
+      const probe = (env: NodeJS.ProcessEnv) =>
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [
+              "-p",
+              "JSON.stringify({preloaded:process.env.MALLEAF_NODE_TEST_PRELOADED,path:process.env.NODE_PATH})",
+            ],
+            { env, cwd: root, encoding: "utf8" },
+          ),
+        );
+      expect(probe(createPaseoInternalEnv(managed))).toEqual({ path: "" });
+      expect(probe(createExternalProcessEnv(managed))).toEqual({
+        preloaded: "yes",
+        path: managed.MALLEAF_HOST_NODE_PATH,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("agent children retain their parent target but never inherit runtime launch controls", () => {

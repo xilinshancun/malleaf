@@ -14,6 +14,7 @@ import { assertStoragePath } from "../isolation.js";
 import { verifySlot } from "../slot/materialize.js";
 import type { SlotManifest } from "../slot/manifest.js";
 import { containedRealPath, exists, StorageError } from "../storage.js";
+import { isolateRuntimeNodeEnvironment } from "./environment.js";
 
 export async function assertSlotDependencyBoundary(slot: string): Promise<void> {
   // Node walks every ancestor when a dependency is absent from the slot. Refuse
@@ -146,9 +147,7 @@ export async function launchRuntime(options: RuntimeLaunchOptions) {
       signal,
       timeoutMs: timeoutMs + 5000,
       env: {
-        ...options.environment,
-        NODE_PATH: "",
-        NODE_OPTIONS: "--no-global-search-paths",
+        ...isolateRuntimeNodeEnvironment(options.environment),
         MALLEAF_DAEMON_HOME: options.daemonHome,
         MALLEAF_SLOT_MANIFEST: path.join(slot, "malleaf.json"),
       },
