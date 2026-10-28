@@ -131,6 +131,7 @@ const acquired = new Map();
 const knownByHome = new Map();
 const bootSnapshots = [];
 const authoritySnapshots = [];
+const evidenceCaptureErrors = [];
 const originalIntent = ledger.intent;
 ledger.intent = async (role, input) => {
   if (role === "candidate")
@@ -148,15 +149,20 @@ ledger.intent = async (role, input) => {
 const originalAcquired = ledger.acquired;
 const originalClear = ledger.clear;
 ledger.clear = async (role, token) => {
-  if (role === "preflight") {
-    const registration = (await ledger.read()).registrations.preflight;
-    if (registration?.instance) {
-      const destination = path.join(evidenceRoot, `preflight-${registration.instance.pid}`);
-      await mkdir(destination, { recursive: true });
-      for (const filename of await readdir(registration.home))
-        if (filename.endsWith(".log"))
-          await cp(path.join(registration.home, filename), path.join(destination, filename));
+  try {
+    if (role === "preflight") {
+      const registration = (await ledger.read()).registrations.preflight;
+      if (registration?.instance) {
+        const destination = path.join(evidenceRoot, `preflight-${registration.instance.pid}`);
+        await mkdir(destination, { recursive: true });
+        for (const filename of await readdir(registration.home))
+          if (filename.endsWith(".log"))
+            await cp(path.join(registration.home, filename), path.join(destination, filename));
+      }
     }
+  } catch (error) {
+    // Evidence failure must fail acceptance, while lifecycle cleanup still runs.
+    evidenceCaptureErrors.push(error);
   }
   return originalClear(role, token);
 };
@@ -304,7 +310,7 @@ try {
   const agent = await current.runtime.client.createAgent({
     provider: "mock",
     model: "ten-second-stream",
-    cwd: prepared.root,
+    cwd: path.join(prepared.root, "authority-workspace"),
   });
   await current.runtime.client.sendMessage(agent.id, "Finish this accepted turn before switching.");
   const turnDeadline = Date.now() + 20_000;
@@ -465,6 +471,7 @@ async function cleanup() {
     errors.push(error);
   }
   await capture().catch((error) => errors.push(error));
+  errors.push(...evidenceCaptureErrors);
   await lease
     .release({
       seal: async () => {
@@ -515,6 +522,17 @@ if (failure) {
       2,
     ),
   );
+  try {
+    await assertNoControllerTokens(
+      evidenceRoot,
+      [...launches.values()].map((launch) => launch.controllerToken),
+    );
+  } catch (scanError) {
+    throw new AggregateError(
+      [failure, scanError],
+      "Failed acceptance evidence contains authority tokens",
+    );
+  }
   throw failure;
 }
 

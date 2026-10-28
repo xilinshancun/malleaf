@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { drainAndCommit } from "../../packages/malleaf-controller/dist/runtime/drain.js";
@@ -56,7 +56,7 @@ export async function exerciseAuthority(runtime, registration) {
     ["update", () => runtime.client.updateDaemon()],
     ["reload", () => runtime.client.reloadDaemonConfig()],
     ["pairing", () => runtime.client.getDaemonPairingOffer({ timeout: 1000 })],
-    ["config", () => runtime.client.patchDaemonConfig({ relay: { enabled: true } })],
+    ["config", () => runtime.client.patchDaemonConfig({ relay: { enabled: false } })],
     // Loopback port 1 is deliberately unusable, even if the rejection regresses.
     ["hub-connect", () => runtime.client.connectHub("http://127.0.0.1:1", "acceptance-fixture")],
     ["hub-permissions", () => runtime.client.updateHubPermissions({ grant: ["daemon.manage"] })],
@@ -86,21 +86,28 @@ export async function exerciseAuthority(runtime, registration) {
 }
 
 export async function exerciseResourcePause(runtime, registration, root, assertOwned) {
-  const filename = path.join(root, "terminal-authority-environment.json");
-  const opened = await runtime.client.openProject(root);
+  const workspace = path.join(root, "authority-workspace");
+  await mkdir(workspace);
+  const filename = path.join(workspace, "terminal-authority-environment.json");
+  const opened = await runtime.client.openProject(workspace);
   assert.ok(opened.workspace, opened.error ?? "Acceptance workspace was not created");
-  const created = await runtime.client.createTerminal(root, "authority-acceptance", undefined, {
-    workspaceId: opened.workspace.id,
-    command: process.execPath,
-    args: [
-      "-e",
-      `require("node:fs").writeFileSync(process.argv[1], JSON.stringify({
+  const created = await runtime.client.createTerminal(
+    workspace,
+    "authority-acceptance",
+    undefined,
+    {
+      workspaceId: opened.workspace.id,
+      command: process.execPath,
+      args: [
+        "-e",
+        `require("node:fs").writeFileSync(process.argv[1], JSON.stringify({
       controllerTokenPresent: process.env.MALLEAF_CONTROLLER_TOKEN !== undefined,
       authorityHashPresent: process.env.MALLEAF_CONTROLLER_AUTHORITY_HASH !== undefined
     })); setInterval(() => {}, 1000);`,
-      filename,
-    ],
-  });
+        filename,
+      ],
+    },
+  );
   assert.equal(created.error, null);
   assert.ok(created.terminal);
   const snapshots = [];
