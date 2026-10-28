@@ -11,8 +11,11 @@ const repoRoot = path.resolve(process.argv[2] ?? ".");
 const entries = {
   supervisor: "packages/server/dist/scripts/supervisor-entrypoint.js",
   worker: "packages/server/dist/server/server/daemon-worker.js",
+  runner: "packages/malleaf-controller/dist/runner/stable.cjs",
+  controller: "packages/malleaf-controller/dist/boot.js",
   activation: "packages/malleaf-controller/dist/runtime/activation.js",
   initializer: "packages/malleaf-controller/dist/runner/initialize.js",
+  installer: "packages/malleaf-controller/dist/runner/install.js",
   lease: "packages/malleaf-controller/dist/runner/lease.js",
 };
 const exported = [];

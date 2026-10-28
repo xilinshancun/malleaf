@@ -59,6 +59,16 @@ async function readConfiguration(filename: string): Promise<RunnerConfiguration>
   return config;
 }
 
+export async function readRunnerConfiguration(home: string): Promise<RunnerConfiguration> {
+  assertStoragePath(home);
+  const root = await realpath(home);
+  const runner = path.join(root, "runner");
+  if (!(await lstat(runner)).isDirectory())
+    throw new StorageError("unsafe_path", "Runner must be a physical directory");
+  await containedRealPath(root, runner);
+  return readConfiguration(path.join(runner, "runner.json"));
+}
+
 async function reservePort(home: string, buildId: string) {
   const start = createHash("sha256").update(home).digest().readUInt16BE(0) % 12768;
   for (let offset = 0; offset < 32; offset++) {

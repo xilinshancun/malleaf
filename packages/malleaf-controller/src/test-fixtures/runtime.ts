@@ -27,13 +27,16 @@ export async function createRuntimeFixture() {
     models: path.join(home, "models/local-speech"),
   };
   await mkdir(shared.plugins, { recursive: true });
-  async function pair(dataId: string) {
-    await writeFile(path.join(sourceRoot, "main.js"), `console.log(${JSON.stringify(dataId)});`);
+  async function pair(dataId: string, runner?: string) {
+    await writeFile(
+      path.join(sourceRoot, "main.js"),
+      runner ?? `console.log(${JSON.stringify(dataId)});`,
+    );
     const slot = await materializeSlot({
       sourceRoot,
       versionsRoot: path.join(home, "versions"),
       paths: ["main.js"],
-      entries: { supervisor: "main.js" },
+      entries: { supervisor: "main.js", ...(runner === undefined ? {} : { runner: "main.js" }) },
       provenance: {
         product: "0.1.0",
         display: `0.1.0.alice-${dataId}`,

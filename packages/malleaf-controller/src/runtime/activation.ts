@@ -31,6 +31,7 @@ import {
 import { drainAndCommit, hasPendingDrainWork } from "./drain.js";
 import { preparePreflight } from "./preflight.js";
 import { epochHome, inspectRecovery, type RecoveryPlan } from "./recovery.js";
+import { assertAcceptanceBoundary } from "../isolation.js";
 
 type PointerStore = Awaited<ReturnType<typeof openPointerStore>>;
 type Journal = Awaited<ReturnType<typeof openSwitchJournal>>;
@@ -54,6 +55,9 @@ export async function createIsolatedActivation(options: {
 }) {
   const home = await realpath(options.home);
   const root = await realpath(options.acceptanceRoot);
+  assertAcceptanceBoundary(root, home);
+  if (!options.environment.HOME)
+    throw new StorageError("unsafe_path", "Activation acceptance requires an explicit fake HOME");
   const temporaryRoot = await realpath(os.tmpdir());
   const osHome = await realpath(options.environment.HOME ?? "");
   if (
