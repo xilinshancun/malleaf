@@ -87,7 +87,10 @@ export async function exerciseAuthority(runtime, registration) {
 
 export async function exerciseResourcePause(runtime, registration, root, assertOwned) {
   const filename = path.join(root, "terminal-authority-environment.json");
+  const opened = await runtime.client.openProject(root);
+  assert.ok(opened.workspace, opened.error ?? "Acceptance workspace was not created");
   const created = await runtime.client.createTerminal(root, "authority-acceptance", undefined, {
+    workspaceId: opened.workspace.id,
     command: process.execPath,
     args: [
       "-e",
