@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { evidenceJson, copyRunnerEvidence, assertNoControllerTokens } from "./smoke-audit.mjs";
+import {
+  readAuthorityEvidence,
+  exerciseAuthority,
+  exerciseResourcePause,
+  exerciseFrozenShutdown,
+} from "./smoke-authority.mjs";
 // Journalled activation acceptance in a new mock-only temporary product home.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -124,6 +130,7 @@ const launches = new Map();
 const acquired = new Map();
 const knownByHome = new Map();
 const bootSnapshots = [];
+const authoritySnapshots = [];
 const originalIntent = ledger.intent;
 ledger.intent = async (role, input) => {
   if (role === "candidate")
@@ -139,6 +146,20 @@ ledger.intent = async (role, input) => {
   return result;
 };
 const originalAcquired = ledger.acquired;
+const originalClear = ledger.clear;
+ledger.clear = async (role, token) => {
+  if (role === "preflight") {
+    const registration = (await ledger.read()).registrations.preflight;
+    if (registration?.instance) {
+      const destination = path.join(evidenceRoot, `preflight-${registration.instance.pid}`);
+      await mkdir(destination, { recursive: true });
+      for (const filename of await readdir(registration.home))
+        if (filename.endsWith(".log"))
+          await cp(path.join(registration.home, filename), path.join(destination, filename));
+    }
+  }
+  return originalClear(role, token);
+};
 ledger.acquired = async (role, token, instance) => {
   const intent = launches.get(token);
   assert.ok(intent, "acquisition must belong to this smoke's launch intent");
@@ -147,11 +168,7 @@ ledger.acquired = async (role, token, instance) => {
   acquired.set(instance.pid, acquisition);
   knownByHome.set(intent.home, acquisition);
   const result = await originalAcquired(role, token, instance);
-  if (
-    role === "candidate" &&
-    instance.listen &&
-    !bootSnapshots.some((snapshot) => snapshot.pid === instance.pid)
-  ) {
+  if (instance.listen && !authoritySnapshots.some((snapshot) => snapshot.pid === instance.pid)) {
     const observer = await attachRuntime({
       slotDirectory: path.join(versionsRoot, intent.buildId),
       buildId: intent.buildId,
@@ -162,6 +179,8 @@ ledger.acquired = async (role, token, instance) => {
       assertOwned: lease.assertOwned,
     });
     try {
+      authoritySnapshots.push({ role, ...(await readAuthorityEvidence(acquisition, observer)) });
+      if (role !== "candidate") return result;
       const status = await observer.quiesce({ action: "status", deadlineMs: 1000 });
       await assert.rejects(readFile(path.join(intent.home, "runtime/boot-drain-released.json")), {
         code: "ENOENT",
@@ -267,34 +286,21 @@ async function capture() {
     });
   }
 }
-async function assertAuthority(runtime) {
-  assert.equal(runtime.info.malleaf.controllerOwned, true);
-  assert.equal(runtime.client.supportsMalleafControllerAuthority(), true);
-  const drainId = randomUUID();
-  for (const action of ["begin", "end", "commit"]) {
-    await assert.rejects(
-      runtime.client.quiesceDaemon({ action, drainId, deadlineMs: 1000 }),
-      /controller_owned/,
-    );
-  }
-  await assert.rejects(runtime.client.shutdownServer({ timeout: 1000 }), /controller_owned/);
-  await assert.rejects(runtime.client.restartServer(), /controller_owned/);
-  await assert.rejects(
-    runtime.client.patchDaemonConfig({ relay: { enabled: true } }),
-    /controller_owned/,
-  );
-  await runtime.quiesce({ action: "begin", drainId, deadlineMs: 10_000 });
-  const publicStatus = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
-  assert.equal(publicStatus.drainId, null);
-  assert.equal(publicStatus.expiresAt, null);
-  assert.equal((await runtime.quiesce({ action: "status", deadlineMs: 1000 })).drainId, drainId);
-  await runtime.quiesce({ action: "end", drainId });
-}
 let completed = false;
 let failure;
+let authorityChecks;
+let resourcePause;
+let frozenShutdown;
 try {
   await record("baseline", await controller.recover());
-  await assertAuthority(current.runtime);
+  const baselineRegistration = acquired.get(current.runtime.instance.pid);
+  authorityChecks = await exerciseAuthority(current.runtime, baselineRegistration);
+  resourcePause = await exerciseResourcePause(
+    current.runtime,
+    baselineRegistration,
+    prepared.root,
+    lease.assertOwned,
+  );
   const agent = await current.runtime.client.createAgent({
     provider: "mock",
     model: "ten-second-stream",
@@ -400,6 +406,12 @@ try {
   assert.equal(current.transaction.step, "rolled_back");
   assert.deepEqual(current.pointer.current, forward.candidate);
 
+  frozenShutdown = await exerciseFrozenShutdown(
+    current.runtime,
+    acquired.get(current.runtime.instance.pid),
+    lease.assertOwned,
+  );
+
   for (const manifest of manifests)
     await verifySlot({
       directory: path.join(versionsRoot, manifest.buildId),
@@ -418,6 +430,12 @@ async function cleanup() {
   // memory records survive a poisoned writer and were obtained before its write.
   for (const registration of knownByHome.values()) {
     try {
+      // A successful preflight has already stopped and disposed its whole home.
+      // Prove exit before skipping it; absence of a lock alone is insufficient.
+      if (!(await readDaemonInstance(registration.home))) {
+        assert.throws(() => process.kill(registration.instance.pid, 0), { code: "ESRCH" });
+        continue;
+      }
       await stopRuntimeInstance({
         daemonHome: registration.home,
         controllerToken: registration.controllerToken,
@@ -439,6 +457,10 @@ async function cleanup() {
       assert.equal(await readDaemonInstance(registration.home), null);
       await ledger.clear(role, registration.token);
     }
+    const cleared = await ledger.read();
+    assert.deepEqual(cleared.registrations, {});
+    assert.equal(cleared.minReaderVersion, 2);
+    assert.equal(cleared.minWriterVersion, 2);
   } catch (error) {
     errors.push(error);
   }
@@ -481,6 +503,10 @@ if (failure) {
         stack: failure.stack,
         causes: failure instanceof AggregateError ? failure.errors.map(String) : [],
         stages,
+        authorityChecks,
+        resourcePause,
+        frozenShutdown,
+        authoritySnapshots,
         acquired: [...acquired.values()],
         hostBefore,
         hostAfter,
@@ -498,8 +524,6 @@ async function makeRemovable(directory) {
     if (entry.isDirectory() && !entry.isSymbolicLink())
       await makeRemovable(path.join(directory, entry.name));
 }
-await makeRemovable(prepared.root);
-await prepared.dispose();
 const evidence = {
   sourceCommit: source.provenance.sourceCommit,
   binding,
@@ -509,10 +533,14 @@ const evidence = {
   acquired: [...acquired.values()],
   evidenceRoot,
   completed,
-  disposed: true,
+  disposed: false,
   allObservedSupervisorsExited: true,
   slotUnchanged: true,
   controllerAuthorityChecked: true,
+  authorityChecks,
+  resourcePause,
+  frozenShutdown,
+  authoritySnapshots,
   pids: [...pids],
   bootSnapshots,
   stages,
@@ -523,5 +551,8 @@ await assertNoControllerTokens(
   [...launches.values()].map((launch) => launch.controllerToken),
 );
 evidence.controllerTokensRedacted = true;
+await makeRemovable(prepared.root);
+await prepared.dispose();
+evidence.disposed = true;
 await writeFile(path.join(evidenceRoot, "result.json"), evidenceJson(evidence, null, 2));
 console.log(evidenceJson(evidence, null, 2));
