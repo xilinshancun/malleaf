@@ -1,3 +1,4 @@
+import { assertUnmanagedDaemonTarget } from "./local-daemon.js";
 import { Command } from "commander";
 import { stopDaemonInstance, type DaemonInstance } from "@getpaseo/server/daemon-control";
 import { connectToDaemon } from "../../utils/client.js";
@@ -16,6 +17,7 @@ export function daemonStopCommand(): Command {
 
 export async function runStopCommand(options: CommandOptions, _command: Command) {
   const target = options.daemonTarget;
+  await assertUnmanagedDaemonTarget(target);
   const timeoutMs = parseTimeoutMs(options.timeout, 15_000);
   const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(1, deadline - Date.now());

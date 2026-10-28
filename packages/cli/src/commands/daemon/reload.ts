@@ -1,3 +1,4 @@
+import { assertUnmanagedDaemonTarget } from "./local-daemon.js";
 import { addJsonAndDaemonHostOptions } from "../../utils/command-options.js";
 import { withOutput } from "../../output/index.js";
 import { Command } from "commander";
@@ -42,6 +43,7 @@ export async function runDaemonReloadCommand(
   options: CommandOptions,
   _command: Command,
 ): Promise<SingleResult<DaemonReloadResult>> {
+  await assertUnmanagedDaemonTarget(options.daemonTarget);
   const client = await connectToDaemon({ target: options.daemonTarget });
   try {
     const payload = await client.reloadDaemonConfig();

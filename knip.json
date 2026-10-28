@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/knip/schema.json",
   "workspaces": {
+    "packages/malleaf-controller": {
+      "entry": ["src/slot/materialize.ts", "src/data/epoch.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "plugins": {
       "entry": ["**/index.{server,client}.{ts,tsx}", "**/*.test.ts"],
       "project": ["**/*.{ts,tsx}"]

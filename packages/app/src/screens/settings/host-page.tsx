@@ -40,7 +40,7 @@ import { useDaemonStatus } from "@/desktop/hooks/use-daemon-status";
 import { useDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
-import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
+import { useIsLocalDaemon, useDesktopRuntimeSelection } from "@/hooks/use-is-local-daemon";
 import {
   getHostRuntimeStore,
   isHostRuntimeConnected,
@@ -365,8 +365,11 @@ export function HostSettingsPage({
   serverId: string;
   onHostRemoved?: () => void;
 }) {
+  const { t } = useTranslation();
   const host = useHostProfile(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
+  const selection = useDesktopRuntimeSelection();
+  const controllerOwned = selection?.ownership === "controller" && selection.serverId === serverId;
 
   if (!host) {
     return <HostNotFound />;
@@ -379,9 +382,14 @@ export function HostSettingsPage({
 
       <HostAppearanceSection host={host} />
 
-      {isLocalDaemon ? <LocalDaemonSection /> : null}
+      {controllerOwned && !isLocalDaemon ? (
+        <Text style={settingsStyles.rowHint}>{t("malleaf:runtimeIdentityMismatch")}</Text>
+      ) : null}
+      {isLocalDaemon || controllerOwned ? <LocalDaemonSection /> : null}
 
-      {!isLocalDaemon ? <UpdateDaemonCard key={host.serverId} host={host} /> : null}
+      {!isLocalDaemon && !controllerOwned ? (
+        <UpdateDaemonCard key={host.serverId} host={host} />
+      ) : null}
 
       <RemoveHostSection host={host} isLocalDaemon={isLocalDaemon} onRemoved={onHostRemoved} />
     </View>
@@ -561,6 +569,9 @@ function ConnectionRow({
 }
 
 function RestartDaemonCard({ host }: { host: HostProfile }) {
+  const selection = useDesktopRuntimeSelection();
+  const controllerOwned =
+    selection?.ownership === "controller" && selection.serverId === host.serverId;
   const { t } = useTranslation();
   const daemonClient = useHostRuntimeClient(host.serverId);
   const isConnected = useHostRuntimeIsConnected(host.serverId);
@@ -596,6 +607,7 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
   );
 
   const handleRestart = useCallback(() => {
+    if (controllerOwned) return;
     if (!daemonClient) {
       Alert.alert(
         t("settings.host.daemon.restart.unavailableTitle"),
@@ -643,21 +655,33 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
           t("settings.host.daemon.restart.dialogFailedMessage"),
         );
       });
-  }, [daemonClient, host.label, host.serverId, isHostConnected, t, waitForDaemonRestart]);
+  }, [
+    controllerOwned,
+    daemonClient,
+    host.label,
+    host.serverId,
+    isHostConnected,
+    t,
+    waitForDaemonRestart,
+  ]);
 
   return (
     <View style={settingsStyles.card} testID="host-page-restart-card">
       <View style={settingsStyles.row}>
         <View style={settingsStyles.rowContent}>
           <Text style={settingsStyles.rowTitle}>{t("settings.host.daemon.restart.title")}</Text>
-          <Text style={settingsStyles.rowHint}>{t("settings.host.daemon.restart.hint")}</Text>
+          <Text style={settingsStyles.rowHint}>
+            {controllerOwned
+              ? t("malleaf:controllerManagedHint")
+              : t("settings.host.daemon.restart.hint")}
+          </Text>
         </View>
         <Button
           variant="outline"
           size="sm"
           leftIcon={restartIcon}
           onPress={handleRestart}
-          disabled={isRestarting || !daemonClient || !isConnected}
+          disabled={controllerOwned || isRestarting || !daemonClient || !isConnected}
           testID="host-page-restart-button"
         >
           {isRestarting

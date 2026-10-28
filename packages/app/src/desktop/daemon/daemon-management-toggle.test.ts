@@ -163,3 +163,18 @@ describe("executeDaemonManagementToggle", () => {
     });
   });
 });
+
+it.each([true, false])(
+  "controller-owned settings never start or stop a runtime (managing=%s)",
+  async (managing) => {
+    const { deps, calls } = makeDeps();
+    expect(
+      await executeDaemonManagementToggle(
+        managing,
+        { ...runningManagedStatus, ownership: "controller" },
+        deps,
+      ),
+    ).toEqual({ kind: "cancelled" });
+    expect(calls).toEqual([]);
+  },
+);

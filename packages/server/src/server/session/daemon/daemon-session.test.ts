@@ -13,6 +13,9 @@ import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { HubRelationshipManagement } from "../../hub/relationship-controller.js";
 import type { SessionOutboundMessage } from "../../messages.js";
 import type { DaemonConfigReloadResult } from "../../daemon-config-store.js";
+import { createQuiesceController } from "../../malleaf/quiesce.js";
+import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from "../../messages.js";
+import { SessionDelivery } from "../owned-subscriptions/index.js";
 
 const tempDirs: string[] = [];
 
@@ -78,6 +81,105 @@ function makeSubsystem(overrides: {
 }
 
 describe("DaemonSession", () => {
+  test("Malleaf drain RPC returns correlated status and refuses cancellation by another switch", async () => {
+    const quiesce = createQuiesceController({
+      agentManager: {
+        beginDrain() {},
+        endDrain() {},
+        isDraining: () => true,
+        prepareForShutdown() {},
+        getDrainWork: () => ({
+          running: [],
+          pendingPermissions: [],
+          pendingRegistrations: 0,
+          pendingAdmissions: 0,
+        }),
+      },
+      schedules: { resumeAfterDrain() {}, async stop() {}, pendingRuns: () => 0 },
+      countResources: async () => ({ terminals: 0, scripts: 0 }),
+      pendingDeliveries: () => 0,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    const { subsystem, emitted } = makeSubsystem({
+      daemonRuntimeConfig: { listen: "127.0.0.1:1", getRelayConfig: () => null, quiesce },
+    });
+    const begin = {
+      type: "daemon.quiesce.request" as const,
+      requestId: "begin",
+      action: "begin" as const,
+      drainId: "00000000-0000-4000-8000-000000000001",
+      deadlineMs: 1000,
+    };
+    expect(SessionInboundMessageSchema.parse(begin)).toEqual(begin);
+    const source = {};
+    const delivered: SessionOutboundMessage[] = [];
+    const delivery = new SessionDelivery((socket, message) => {
+      expect(socket).toBe(source);
+      expect(delivery.permits(socket, message)).toBe(true);
+      delivered.push(message);
+    });
+    delivery.attach(source, true);
+    try {
+      await delivery.request(source, begin, async () => {
+        await subsystem.handleQuiesceRequest(begin);
+        expect(delivery.reply(emitted[0])).toBe(true);
+      });
+      expect(delivered).toEqual([emitted[0]]);
+      expect(SessionOutboundMessageSchema.parse(emitted[0])).toMatchObject({
+        type: "daemon.quiesce.response",
+        payload: { requestId: "begin", status: { state: "draining", drainId: begin.drainId } },
+      });
+      await subsystem.handleQuiesceRequest({
+        ...begin,
+        requestId: "wrong-end",
+        action: "end",
+        drainId: "00000000-0000-4000-8000-000000000002",
+      });
+      expect(emitted[1]).toMatchObject({
+        type: "rpc_error",
+        payload: { requestId: "wrong-end", code: "drain_not_owned" },
+      });
+      await subsystem.handleQuiesceRequest({ ...begin, requestId: "right-end", action: "end" });
+      expect(emitted[2]).toMatchObject({
+        type: "daemon.quiesce.response",
+        payload: { requestId: "right-end", status: { state: "accepting" } },
+      });
+      await subsystem.handleQuiesceRequest({ ...begin, requestId: "rebegin" });
+      const commit = { ...begin, requestId: "commit", action: "commit" as const };
+      expect(SessionInboundMessageSchema.parse(commit)).toEqual(commit);
+      await delivery.request(source, commit, async () => {
+        await subsystem.handleQuiesceRequest(commit);
+        expect(delivery.reply(emitted[4])).toBe(true);
+      });
+      expect(SessionOutboundMessageSchema.parse(emitted[4])).toMatchObject({
+        type: "daemon.quiesce.response",
+        payload: { requestId: "commit", status: { state: "shutdown", drainId: begin.drainId } },
+      });
+      await subsystem.handleQuiesceRequest({
+        ...begin,
+        requestId: "end-after-commit",
+        action: "end",
+      });
+      expect(emitted[5]).toMatchObject({ type: "rpc_error", payload: { code: "daemon_stopping" } });
+    } finally {
+      await delivery.close();
+      await quiesce.dispose();
+    }
+  });
+
+  test("Malleaf drain RPC fails explicitly when the runtime lacks the capability", async () => {
+    const { subsystem, emitted } = makeSubsystem({});
+    await subsystem.handleQuiesceRequest({
+      type: "daemon.quiesce.request",
+      requestId: "unsupported",
+      action: "status",
+    });
+    expect(emitted).toMatchObject([
+      { type: "rpc_error", payload: { requestId: "unsupported", code: "quiesce_failed" } },
+    ]);
+  });
   test("config reload returns the daemon-owned classification", async () => {
     const { subsystem, emitted } = makeSubsystem({
       reloadConfig: async () => ({

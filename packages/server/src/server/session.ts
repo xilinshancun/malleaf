@@ -1,4 +1,5 @@
 import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+import { runNewMalleafWork } from "./malleaf/admission.js";
 import type { AgentMessageDelivery } from "./agent/agent-messages/index.js";
 import { AgentDirectory } from "./agent/directory.js";
 import { ConnectedHostSession } from "./connected-hosts/index.js";
@@ -2221,6 +2222,7 @@ export class Session {
         return;
       }
       try {
+        if (!this.daemonSession.permitsControllerRequest(msg)) return;
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -2941,6 +2943,8 @@ export class Session {
         return this.daemonSession.handleDiagnosticsRequest(msg);
       case "daemon.update.request":
         return this.daemonSession.handleUpdateRequest(msg);
+      case "daemon.quiesce.request":
+        return this.daemonSession.handleQuiesceRequest(msg);
       case "set_daemon_config_request":
         return this.daemonConfigStore.patch(msg.config).then((config) => {
           return this.emit({
@@ -8304,24 +8308,26 @@ export class Session {
           );
         }
       };
-      const sent = msg.messageId
-        ? this.messageReceipts.send({
-            agentId,
-            messageId: msg.messageId,
-            request: {
-              prompt,
-              sourceAgentId: msg.sourceAgentId,
-              sourceAgentServerId: msg.sourceAgentServerId,
-              sessionMode: msg.sessionMode,
-              activeTurnBehavior:
-                msg.activeTurnBehavior ?? (msg.sourceAgentId ? "steer" : "interrupt"),
-            },
-            prepare: async () => {
-              if (!msg.sourceAgentId) await this.prepareAgentMessage(agentId, msg.text);
-            },
-            send,
-          })
-        : send();
+      const sent = runNewMalleafWork(this.agentManager, agentId, () =>
+        msg.messageId
+          ? this.messageReceipts.send({
+              agentId,
+              messageId: msg.messageId,
+              request: {
+                prompt,
+                sourceAgentId: msg.sourceAgentId,
+                sourceAgentServerId: msg.sourceAgentServerId,
+                sessionMode: msg.sessionMode,
+                activeTurnBehavior:
+                  msg.activeTurnBehavior ?? (msg.sourceAgentId ? "steer" : "interrupt"),
+              },
+              prepare: async () => {
+                if (!msg.sourceAgentId) await this.prepareAgentMessage(agentId, msg.text);
+              },
+              send,
+            })
+          : send(),
+      );
       void sent.catch((error) => {
         if (deliveryStatus === "queued") {
           this.handleAgentRunError(agentId, error, "Failed to dispatch queued agent message");

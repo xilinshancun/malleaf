@@ -229,6 +229,11 @@ jobs:
         if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
         run: npm run test --workspace=@getpaseo/builtin-plugins
 
+      - &malleaf_controller_tests
+        name: Run Malleaf controller tests
+        if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
+        run: npm run test --workspace=@malleaf/controller
+
       - &server_hub_contract
         name: Run Hub CLI/daemon contract
         if: ${{ needs.changes.outputs.full == 'false' && needs.changes.outputs.server == 'false' && needs.changes.outputs.hub != 'false' }}
@@ -254,6 +259,7 @@ jobs:
         env: *server_test_env
 
       - *server_plugin_tests
+      - *malleaf_controller_tests
       - *server_hub_contract
 
   # Keep the serial integration chain off the Windows unit critical path.

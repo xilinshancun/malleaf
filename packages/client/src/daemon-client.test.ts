@@ -8471,3 +8471,36 @@ test("closes before admission when a protected-capable daemon is reached in lega
   expect(daemonReceived).toHaveLength(1);
   expect(JSON.parse(daemonReceived[0] as string)).toMatchObject({ type: "hello" });
 });
+
+test("gates atomic Malleaf drain commit separately from ordinary quiesce", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  mock.triggerOpen({ features: { malleaf: true } });
+  await connecting;
+  expect(client.supportsMalleaf()).toBe(true);
+  expect(client.supportsMalleafQuiesceCommit()).toBe(false);
+  expect(client.supportsMalleafBootDrain()).toBe(false);
+  expect(client.supportsMalleafControllerAuthority()).toBe(false);
+  await expect(
+    client.quiesceDaemon({
+      action: "begin",
+      drainId: "12345678-1234-4234-8234-123456789abc",
+      controllerToken: "a".repeat(64),
+    }),
+  ).rejects.toThrow("Update the host to support Malleaf controller authority.");
+  await expect(client.shutdownServer({ controllerToken: "a".repeat(64) })).rejects.toThrow(
+    "Update the host to support Malleaf controller authority.",
+  );
+  await expect(
+    client.quiesceDaemon({ action: "commit", drainId: "00000000-0000-4000-8000-000000000001" }),
+  ).rejects.toThrow("Update the host to support atomic Malleaf drain commit.");
+  expect(mock.sent).toEqual([]);
+});

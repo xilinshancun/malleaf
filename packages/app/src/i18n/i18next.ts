@@ -2,6 +2,7 @@ import { createInstance, type BackendModule } from "i18next";
 import { initReactI18next } from "react-i18next";
 import { observeI18nInit } from "./init";
 import { en } from "./resources/en";
+import { malleafTranslations } from "./resources/malleaf";
 
 // Literal requires keep every locale bundled for offline use, while evaluating
 // its resource module only when selected. Synchronous reads preserve the language
@@ -9,7 +10,14 @@ import { en } from "./resources/en";
 const bundledTranslations: BackendModule = {
   type: "backend",
   init() {},
-  read(language, _namespace, callback) {
+  read(language, namespace, callback) {
+    if (namespace === "malleaf") {
+      callback(
+        null,
+        language === "en" || language === "zh-CN" ? malleafTranslations[language] : undefined,
+      );
+      return;
+    }
     switch (language) {
       case "en":
         callback(null, en);
@@ -55,8 +63,10 @@ observeI18nInit(
       fallbackLng: "en",
       lng: "en",
       partialBundledLanguages: true,
+      ns: ["translation", "malleaf"],
+      defaultNS: "translation",
       resources: {
-        en: { translation: en },
+        en: { translation: en, malleaf: malleafTranslations.en },
       },
       interpolation: {
         escapeValue: false,

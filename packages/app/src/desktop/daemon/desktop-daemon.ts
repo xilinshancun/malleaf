@@ -26,6 +26,10 @@ export interface DesktopDaemonStatus {
   ownedByDesktop: boolean;
   startedAt: string | null;
   error: string | null;
+  // COMPAT: older desktop shells omit controller ownership metadata.
+  ownership?: "desktop" | "controller";
+  dataId?: string;
+  expectedBuildId?: string;
 }
 
 export interface DesktopDaemonLogs {
@@ -135,6 +139,11 @@ function parseDesktopDaemonStatus(raw: unknown): DesktopDaemonStatus {
     ownedByDesktop: raw.ownedByDesktop === true,
     startedAt: typeof raw.startedAt === "string" ? raw.startedAt : null,
     error: toStringOrNull(raw.error),
+    ...(raw.ownership === "desktop" || raw.ownership === "controller"
+      ? { ownership: raw.ownership }
+      : {}),
+    ...(typeof raw.dataId === "string" ? { dataId: raw.dataId } : {}),
+    ...(typeof raw.expectedBuildId === "string" ? { expectedBuildId: raw.expectedBuildId } : {}),
   };
 }
 
@@ -198,6 +207,9 @@ export async function stopDesktopDaemon(
 
 export async function confirmAndStopDesktopDaemon(): Promise<DesktopDaemonStatus | null> {
   const captured = await getDesktopDaemonStatus();
+  if (captured.ownership === "controller") {
+    throw new Error(i18n.t("malleaf:controllerManagedHint"));
+  }
   if (!captured.pid || !captured.startedAt) return captured;
   const ownership = captured.ownedByDesktop
     ? i18n.t("desktop.daemon.lifecycle.ownedMessage")

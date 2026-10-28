@@ -9,6 +9,11 @@ import type {
 } from "./agent-sdk-types.js";
 import type { AgentStreamEvent } from "../messages.js";
 import { respondToAgentPermission } from "./permission-response.js";
+import {
+  assertMalleafAdmission,
+  beginMalleafDrain,
+  pendingMalleafAdmissions,
+} from "../malleaf/admission.js";
 
 class FakePermissionAgentManager {
   permissionResult: AgentPermissionResult | void;
@@ -69,6 +74,46 @@ async function* emptyAgentStream(): AsyncGenerator<AgentStreamEvent> {}
 
 describe("respondToAgentPermission", () => {
   const logger = createTestLogger();
+
+  test("Malleaf drain counts a permission continuation across asynchronous provider admission", async () => {
+    let allowReload!: () => void;
+    const reload = new Promise<void>((resolve) => {
+      allowReload = resolve;
+    });
+    let reloadStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reloadStarted = resolve;
+    });
+    class DelayedPermissionManager extends FakePermissionAgentManager {
+      override async reloadStalePluginSession() {
+        reloadStarted();
+        await reload;
+      }
+      override streamAgent(agentId: string, prompt: AgentPromptInput, options?: AgentRunOptions) {
+        assertMalleafAdmission(this, agentId);
+        return super.streamAgent(agentId, prompt, options);
+      }
+    }
+    const agentManager = new DelayedPermissionManager();
+    agentManager.permissionResult = { followUpPrompt: "approved continuation" };
+    beginMalleafDrain(agentManager);
+    const response = respondToAgentPermission({
+      agentManager,
+      agentId: "agent-1",
+      requestId: "permission-1",
+      response: { behavior: "allow" },
+      logger,
+    });
+    await started;
+    expect(pendingMalleafAdmissions(agentManager)).toBe(1);
+    allowReload();
+    await response;
+    expect(pendingMalleafAdmissions(agentManager)).toBe(0);
+    expect(agentManager.streamRuns).toEqual([
+      { agentId: "agent-1", prompt: "approved continuation", options: undefined },
+    ]);
+    expect(() => agentManager.streamAgent("agent-1", "new work")).toThrow("draining");
+  });
 
   test("starts a follow-up run returned by the provider permission response", async () => {
     const agentManager = new FakePermissionAgentManager();

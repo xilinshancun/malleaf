@@ -1,4 +1,5 @@
 import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+import { assertMalleafAdmission, runAcceptedMalleafWork } from "./malleaf/admission.js";
 import {
   createAgentMessageDelivery,
   type AgentMessageDelivery,
@@ -708,24 +709,26 @@ export class VoiceAssistantWebSocketServer {
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.agentMessages = createAgentMessageDelivery({
-      dispatch: async (batch) => {
-        const { disposition } = await sendPreparedPromptToAgent({
-          agentManager,
-          agentStorage,
-          agentId: batch.recipientId,
-          prompt: batch.prompt,
-          activeTurnBehavior: batch.activeTurnBehavior,
-          sessionMode: batch.sessionMode,
-          clearPendingPermissions: batch.clearPendingPermissions,
-          unarchive: batch.unarchive,
-          runOptions: { clientMessageId: batch.messageIds[0] },
-          onDispatch: batch.onDispatch,
-          logger: this.logger,
-        });
-        if (disposition === "turn_started")
-          await waitForAgentRunStartWithTimeout(agentManager, batch.recipientId);
-        return disposition;
-      },
+      assertAdmitting: (recipientId) => assertMalleafAdmission(agentManager, recipientId),
+      dispatch: (batch) =>
+        runAcceptedMalleafWork(agentManager, batch.recipientId, async () => {
+          const { disposition } = await sendPreparedPromptToAgent({
+            agentManager,
+            agentStorage,
+            agentId: batch.recipientId,
+            prompt: batch.prompt,
+            activeTurnBehavior: batch.activeTurnBehavior,
+            sessionMode: batch.sessionMode,
+            clearPendingPermissions: batch.clearPendingPermissions,
+            unarchive: batch.unarchive,
+            runOptions: { clientMessageId: batch.messageIds[0] },
+            onDispatch: batch.onDispatch,
+            logger: this.logger,
+          });
+          if (disposition === "turn_started")
+            await waitForAgentRunStartWithTimeout(agentManager, batch.recipientId);
+          return disposition;
+        }),
       onError: (err, batch) =>
         this.logger.error(
           { err, agentId: batch.recipientId, messageIds: batch.messageIds },
@@ -1939,12 +1942,24 @@ export class VoiceAssistantWebSocketServer {
       serverId: this.serverId,
       hostname: getHostName(),
       version: this.daemonVersion,
+      ...(this.daemonRuntimeConfig?.malleafIdentity
+        ? {
+            malleaf: {
+              ...this.daemonRuntimeConfig.malleafIdentity,
+              ...(this.daemonRuntimeConfig.controllerAuthority ? { controllerOwned: true } : {}),
+            },
+          }
+        : {}),
       sourceId: session.getHostSourceId(),
       permissions: session.getPermissions(),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
+        malleafControllerAuthority: true,
+        ...(this.daemonRuntimeConfig?.quiesce
+          ? { malleaf: true, malleafQuiesceCommit: true, malleafBootDrain: true }
+          : {}),
         connectedHosts: true,
         hostMultiplexing: true,
         // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.

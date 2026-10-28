@@ -1,3 +1,4 @@
+import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useIsExplorerSidebarOpen } from "@/workspace-tabs/explorer-sidebar";
@@ -254,6 +255,9 @@ async function shouldStartBuiltInDaemon(): Promise<boolean> {
 }
 
 function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
+  // Read-only controller attachment follows published epoch/endpoint changes,
+  // even when desktop lifecycle management is disabled in settings.
+  useLocalDaemonServerId();
   useEffect(() => {
     const store = getHostRuntimeStore();
     return bindHostRuntimeAppState(store, AppState);

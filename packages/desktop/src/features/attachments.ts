@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { app } from "electron";
 import { resolvePaseoHome } from "@getpaseo/server/daemon-control";
 
 const ATTACHMENTS_DIRNAME = "desktop-attachments";
@@ -12,7 +13,7 @@ interface AttachmentFileResult {
 }
 
 function attachmentsDirPath(): string {
-  return path.join(resolvePaseoHome(process.env), ATTACHMENTS_DIRNAME);
+  return path.join(app.getPath("userData"), ATTACHMENTS_DIRNAME);
 }
 
 async function ensureAttachmentsDir(): Promise<string> {
@@ -61,9 +62,14 @@ function resolveManagedAttachmentPath(inputPath: unknown): string {
   if (typeof inputPath !== "string" || inputPath.trim().length === 0) {
     throw new Error("Attachment path is required.");
   }
-  const resolvedDir = `${path.resolve(attachmentsDirPath())}${path.sep}`;
   const resolvedPath = path.resolve(inputPath.trim());
-  if (!resolvedPath.startsWith(resolvedDir)) {
+  // COMPAT(malleaf-desktop-attachments): old drafts retain absolute paths in the
+  // static daemon home. Read/delete them, but write and collect only userData.
+  const roots = [
+    attachmentsDirPath(),
+    path.join(resolvePaseoHome(process.env), ATTACHMENTS_DIRNAME),
+  ];
+  if (!roots.some((root) => resolvedPath.startsWith(`${path.resolve(root)}${path.sep}`))) {
     throw new Error("Attachment path must stay within desktop-managed storage.");
   }
   return resolvedPath;

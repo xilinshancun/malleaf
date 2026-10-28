@@ -5,6 +5,12 @@ import {
   type HostRouteFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
+import {
+  DaemonQuiesceRequestSchema,
+  DaemonQuiesceResponseSchema,
+  type DaemonQuiesceRequest,
+  type MalleafQuiesceStatus,
+} from "@getpaseo/protocol/malleaf/quiesce";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
 import { subscribeTimeline, type TimelineMessage } from "./timeline-subscription/index.js";
@@ -779,6 +785,7 @@ type AgentRefreshedStatusPayload = z.infer<typeof AgentRefreshedStatusPayloadSch
 type RestartRequestedStatusPayload = z.infer<typeof RestartRequestedStatusPayloadSchema>;
 type ShutdownRequestedStatusPayload = z.infer<typeof ShutdownRequestedStatusPayloadSchema>;
 export interface ShutdownServerOptions {
+  controllerToken?: string;
   requestId?: string;
   timeout?: number;
 }
@@ -4101,10 +4108,13 @@ export class DaemonClient {
   }
 
   async shutdownServer(options?: ShutdownServerOptions): Promise<ShutdownRequestedStatusPayload> {
+    if (options?.controllerToken !== undefined && !this.supportsMalleafControllerAuthority())
+      throw new Error("Update the host to support Malleaf controller authority.");
     const resolvedRequestId = this.createRequestId(options?.requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "shutdown_server_request",
       requestId: resolvedRequestId,
+      controllerToken: options?.controllerToken,
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -4147,6 +4157,51 @@ export class DaemonClient {
           return null;
         }
         return parsed.data.payload;
+      },
+    });
+  }
+
+  supportsMalleaf(): boolean {
+    return this.lastServerInfoMessage?.features?.malleaf === true;
+  }
+
+  supportsMalleafBootDrain(): boolean {
+    return this.lastServerInfoMessage?.features?.malleafBootDrain === true;
+  }
+
+  supportsMalleafControllerAuthority(): boolean {
+    return this.getLastServerInfoMessage()?.features?.malleafControllerAuthority === true;
+  }
+
+  supportsMalleafQuiesceCommit(): boolean {
+    return this.lastServerInfoMessage?.features?.malleafQuiesceCommit === true;
+  }
+
+  async quiesceDaemon(
+    input: Omit<DaemonQuiesceRequest, "type" | "requestId">,
+  ): Promise<MalleafQuiesceStatus> {
+    if (!this.supportsMalleaf())
+      throw new Error("Update the host to a Malleaf version supporting runtime switching.");
+    if (input.controllerToken !== undefined && !this.supportsMalleafControllerAuthority())
+      throw new Error("Update the host to support Malleaf controller authority.");
+    if (input.action === "commit" && !this.supportsMalleafQuiesceCommit())
+      throw new Error("Update the host to support atomic Malleaf drain commit.");
+    const requestId = this.createRequestId();
+    const message = DaemonQuiesceRequestSchema.parse({
+      ...input,
+      type: "daemon.quiesce.request",
+      requestId,
+    });
+    return this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      timeout: (input.deadlineMs ?? 60_000) + 5000,
+      select: (msg) => {
+        const parsed = DaemonQuiesceResponseSchema.safeParse(msg);
+        return parsed.success && parsed.data.payload.requestId === requestId
+          ? parsed.data.payload.status
+          : null;
       },
     });
   }

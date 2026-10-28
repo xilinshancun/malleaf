@@ -1,3 +1,5 @@
+import type { DaemonTarget } from "../../utils/daemon-target.js";
+import { assertHomeNotControllerOwned } from "@getpaseo/server/malleaf-runtime";
 import { Command, Option } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -54,11 +56,16 @@ export function resolveDaemonRunnerEntry(env: NodeJS.ProcessEnv = process.env): 
   throw new Error("Unable to resolve @getpaseo/server package root for daemon runner");
 }
 
+export async function assertUnmanagedDaemonTarget(target: DaemonTarget): Promise<void> {
+  if (target.kind === "instance") await assertHomeNotControllerOwned(target.home);
+}
+
 export async function launchLocalDaemon(options: {
   home: string;
   timeoutMs?: number;
   foreground?: boolean;
 }) {
+  await assertHomeNotControllerOwned(options.home);
   const abort = new AbortController();
   const cancel = () => abort.abort();
   process.once("SIGINT", cancel);

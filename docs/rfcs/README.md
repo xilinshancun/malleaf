@@ -39,7 +39,7 @@ If implementation changes a contract or invalidates an assumption, amend the RFC
 | RFC                               | Subject                                       | Status                                              |
 | --------------------------------- | --------------------------------------------- | --------------------------------------------------- |
 | [0001](0001-product-isolation.md) | Product identity and local isolation          | Verified against `3b7455eda`; all 21 CI jobs passed |
-| [0002](0002-personal-runtime.md)  | Personal runtime slots and paired data epochs | Accepted; depends on RFC-0001                       |
+| [0002](0002-personal-runtime.md)  | Personal runtime slots and paired data epochs | Implementing; T1 has committed process evidence     |
 
 The [product brief](../malleaf.md) records the requested behavior; [upstream provenance](../../UPSTREAM.md) records the imported baseline.
 

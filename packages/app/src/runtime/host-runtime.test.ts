@@ -16,7 +16,12 @@ import type { HostDirectory } from "@getpaseo/protocol/hosts";
 import type { ConnectionOffer } from "@getpaseo/protocol/connection-offer";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import type { AgentPermissionRequest } from "@getpaseo/protocol/agent-types";
-import type { HostConnection, HostProfile } from "@/types/host-connection";
+import {
+  StoredHostRegistrySchema,
+  normalizeStoredHostProfile,
+  type HostConnection,
+  type HostProfile,
+} from "@/types/host-connection";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import { useSessionStore, type Agent } from "@/stores/session-store";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
@@ -4778,4 +4783,56 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
     expect(seenProbes).not.toContainEqual(expect.objectContaining({ endpoint: "metro-host:8081" }));
     expect(store.getHosts()).toHaveLength(0);
   });
+});
+
+it("replaces only the controller connection across epoch endpoint changes", async () => {
+  const store = new HostRuntimeStore({
+    deps: {
+      createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+      connectToDaemon: async ({ host }) => ({
+        client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+        serverId: host.serverId,
+        hostname: "test",
+      }),
+      getClientId: async () => "cid_controller_test",
+    },
+    storage: createMemoryHostRuntimeStorage(),
+  });
+  try {
+    await store.upsertConnectionFromListen({
+      serverId: "local",
+      listenAddress: "remote.example:9999",
+      hostname: "test",
+    });
+    for (const port of [6798, 6799]) {
+      await store.upsertConnectionFromListen({
+        serverId: "local",
+        listenAddress: `127.0.0.1:${port}`,
+        hostname: "test",
+        managedByController: true,
+      });
+    }
+    const hosts = store.getHosts();
+    expect(StoredHostRegistrySchema.safeParse(hosts).success).toBe(true);
+    expect(normalizeStoredHostProfile(hosts[0])?.preferredConnectionId).toBe("malleaf:controller");
+    expect(
+      normalizeStoredHostProfile(hosts[0])?.connections.some(
+        (connection) => connection.id === "malleaf:controller",
+      ),
+    ).toBe(true);
+    expect(hosts[0]?.connections).toHaveLength(2);
+    expect(hosts[0]?.connections).toContainEqual({
+      id: "malleaf:controller",
+      type: "directTcp",
+      endpoint: "localhost:6799",
+    });
+    expect(hosts[0]?.connections).toContainEqual({
+      id: "direct:remote.example:9999",
+      type: "directTcp",
+      endpoint: "remote.example:9999",
+    });
+    expect(hosts[0]?.preferredConnectionId).toBe("malleaf:controller");
+  } finally {
+    store.syncHosts([]);
+  }
 });

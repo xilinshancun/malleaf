@@ -1,3 +1,4 @@
+import { loadControllerAuthority } from "./malleaf/controller-authority.js";
 import { malleafDaemonEndpoint } from "@getpaseo/protocol/malleaf/product-identity";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import {
@@ -162,6 +163,9 @@ import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createMalleafOrchestrationSkills } from "./malleaf/global-integrations.js";
+import { readMalleafRuntimeIdentity } from "./malleaf/runtime-identity.js";
+import { publishBootDrainMarker, restoreBootDrain } from "./malleaf/boot-drain.js";
+import { createQuiesceController } from "./malleaf/quiesce.js";
 import {
   resolveReloadableConfig,
   type ResolvedDaemonSettings,
@@ -613,6 +617,14 @@ export async function createPaseoDaemon(
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
+  const controllerAuthority = await loadControllerAuthority(
+    config.paseoHome,
+    process.env.MALLEAF_CONTROLLER_AUTHORITY_HASH,
+  );
+  const malleafIdentity = await readMalleafRuntimeIdentity({
+    manifestPath: process.env.MALLEAF_SLOT_MANIFEST,
+    moduleUrl: import.meta.url,
+  });
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
   const obsoleteTimelineDirectory = path.join(config.paseoHome, "agent-timelines");
@@ -1424,6 +1436,36 @@ export async function createPaseoDaemon(
     createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
+  const quiesce = createQuiesceController({
+    agentManager,
+    schedules: scheduleService,
+    releaseBootDrain: (drainId) => publishBootDrainMarker(config.paseoHome, drainId),
+    pendingDeliveries: () => wsServer?.agentMessages.pendingCount() ?? 0,
+    countResources: async () => {
+      const terminals = (
+        await Promise.all(
+          terminalManager.listDirectories().map((cwd) => terminalManager.getTerminals(cwd)),
+        )
+      ).flat();
+      const workspaces = new Set(terminals.map((terminal) => terminal.workspaceId));
+      const scripts = [...workspaces]
+        .flatMap((workspaceId) => scriptRuntimeStore.listForWorkspace(workspaceId))
+        .filter((script) => script.lifecycle === "running").length;
+      return { terminals: terminals.length, scripts };
+    },
+    onError: (error) => logger.error({ err: error }, "Failed to release Malleaf runtime drain"),
+  });
+
+  await restoreBootDrain({
+    home: config.paseoHome,
+    drainId: process.env.MALLEAF_BOOT_DRAIN_ID,
+    adopt: quiesce.adoptBootDrain,
+    onInvalid: (error) =>
+      logger.warn(
+        { err: error },
+        "Invalid boot release marker; keeping candidate admission closed",
+      ),
+  });
   await scheduleService.start();
 
   agentManager.setAgentArchivedCallback(async (agentId) => {
@@ -1831,6 +1873,9 @@ export async function createPaseoDaemon(
               providerSnapshotManager,
               {
                 listen: formatListenTarget(boundListenTarget ?? listenTarget),
+                malleafIdentity,
+                controllerAuthority,
+                quiesce,
                 worktreesRoot: config.worktreesRoot,
                 get appBaseUrl() {
                   return appBaseUrl;
@@ -1933,6 +1978,7 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
+    await quiesce.dispose();
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
     // Stop tracking plugin provider registrations before anything tears plugins

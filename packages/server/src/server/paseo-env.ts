@@ -28,7 +28,17 @@ function buildExternalProcessEnv(
   baseEnv: ProcessEnvRecord,
   overlays: ProcessEnvRecord[],
 ): ExternalProcessEnv {
-  const sanitized = Object.assign({}, baseEnv, ...overlays);
+  const sanitized = { ...baseEnv };
+  // Internal workers keep the slot's restricted loader. Harnesses and user
+  // terminals get the host settings back, before their explicit overrides.
+  for (const key of ["NODE_OPTIONS", "NODE_PATH"] as const) {
+    const hostKey = `MALLEAF_HOST_${key}`;
+    if (baseEnv[hostKey] !== undefined) {
+      sanitized[key] = baseEnv[hostKey] || undefined;
+    }
+    delete sanitized[hostKey];
+  }
+  Object.assign(sanitized, ...overlays);
   for (const key of RUNTIME_CONTROL_ENV_KEYS) {
     delete sanitized[key];
   }

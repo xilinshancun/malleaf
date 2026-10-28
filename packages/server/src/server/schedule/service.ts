@@ -1,4 +1,5 @@
 import { formatSystemNotificationPrompt } from "../agent/agent-messages/index.js";
+import { withTimeout } from "../../utils/promise-timeout.js";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -286,6 +287,8 @@ export class ScheduleService {
   ) => Promise<ScheduleExecutionResult>;
   private readonly runningScheduleIds = new Set<string>();
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private paused = false;
+  private readonly activeOperations = new Set<Promise<unknown>>();
 
   constructor(options: ScheduleServiceOptions) {
     this.logger = options.logger.child({ module: "schedule-service" });
@@ -303,6 +306,12 @@ export class ScheduleService {
   async start(): Promise<void> {
     await this.recoverInterruptedRuns();
     await this.sweepOrphanedSchedules();
+    if (!this.paused) this.resumeAfterDrain();
+  }
+
+  // A live paused run is not an interrupted run. Do not apply boot recovery here.
+  resumeAfterDrain(): void {
+    this.paused = false;
     if (this.tickTimer) {
       return;
     }
@@ -315,11 +324,36 @@ export class ScheduleService {
     this.tickTimer = timer;
   }
 
-  async stop(): Promise<void> {
+  pauseForDrain(): void {
+    this.paused = true;
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
+  }
+
+  async stop(options?: { drainTimeoutMs?: number }): Promise<void> {
+    this.pauseForDrain();
+    if (options?.drainTimeoutMs !== undefined) {
+      await withTimeout({
+        promise: Promise.allSettled(this.activeOperations),
+        timeoutMs: options.drainTimeoutMs,
+        label: "waiting for accepted schedule runs",
+      });
+    }
+  }
+
+  pendingRuns(): number {
+    return this.activeOperations.size;
+  }
+
+  private trackOperation<T>(operation: Promise<T>): Promise<T> {
+    this.activeOperations.add(operation);
+    const settled = () => {
+      this.activeOperations.delete(operation);
+    };
+    void operation.then(settled, settled);
+    return operation;
   }
 
   async create(input: CreateScheduleInput): Promise<StoredSchedule> {
@@ -555,7 +589,13 @@ export class ScheduleService {
     return completed;
   }
 
-  async runOnce(id: string): Promise<StoredSchedule> {
+  runOnce(id: string): Promise<StoredSchedule> {
+    if (this.paused)
+      return Promise.reject(new Error("Schedule service is paused for a runtime switch"));
+    return this.trackOperation(this.runOnceInternal(id));
+  }
+
+  private async runOnceInternal(id: string): Promise<StoredSchedule> {
     const schedule = await this.inspect(id);
     if (schedule.status === "completed") {
       throw new ScheduleStateConflictError(`Schedule ${id} is already completed`);
@@ -567,7 +607,12 @@ export class ScheduleService {
     return this.inspect(id);
   }
 
-  async tick(): Promise<void> {
+  tick(): Promise<void> {
+    if (this.paused) return Promise.resolve();
+    return this.trackOperation(this.tickInternal());
+  }
+
+  private async tickInternal(): Promise<void> {
     const now = this.now();
     const schedules = await this.store.list();
     for (const schedule of schedules) {

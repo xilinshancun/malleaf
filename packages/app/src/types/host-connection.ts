@@ -21,6 +21,7 @@ import {
 import { z } from "zod";
 
 export { DirectTcpHostConnectionSchema };
+export const MALLEAF_CONTROLLER_CONNECTION_ID = "malleaf:controller";
 export type DirectTcpHostConnection = Omit<WireDirectTcpHostConnection, "password">;
 
 export interface DirectSocketHostConnection {
@@ -136,7 +137,7 @@ export function resolveActiveHostServerId(params: {
   );
 }
 
-function hostConnectionEquals(left: HostConnection, right: HostConnection): boolean {
+export function hostConnectionEquals(left: HostConnection, right: HostConnection): boolean {
   if (left.type !== right.type || left.id !== right.id) {
     return false;
   }
@@ -531,6 +532,18 @@ export const StoredHostRegistrySchema = z.array(StoredHostProfileSchema);
 type StoredHostConnection = z.infer<typeof StoredHostConnectionSchema>;
 
 function normalizeStoredConnection(connection: StoredHostConnection): HostConnection | null {
+  const normalized = normalizeStoredTransport(connection);
+  if (
+    normalized &&
+    connection.id === MALLEAF_CONTROLLER_CONNECTION_ID &&
+    ["directTcp", "directSocket", "directPipe"].includes(normalized.type)
+  ) {
+    normalized.id = MALLEAF_CONTROLLER_CONNECTION_ID;
+  }
+  return normalized;
+}
+
+function normalizeStoredTransport(connection: StoredHostConnection): HostConnection | null {
   if (connection.type === "routed") return connection;
   if (connection.type === "directTcp") {
     try {
@@ -548,11 +561,23 @@ function normalizeStoredConnection(connection: StoredHostConnection): HostConnec
   }
   if (connection.type === "directSocket") {
     const path = connection.path.trim();
-    return path ? { id: `socket:${path}`, type: "directSocket", path } : null;
+    return path
+      ? {
+          id: `socket:${path}`,
+          type: "directSocket",
+          path,
+        }
+      : null;
   }
   if (connection.type === "directPipe") {
     const path = connection.path.trim();
-    return path ? { id: `pipe:${path}`, type: "directPipe", path } : null;
+    return path
+      ? {
+          id: `pipe:${path}`,
+          type: "directPipe",
+          path,
+        }
+      : null;
   }
   if (connection.type === "remoteSsh") {
     try {

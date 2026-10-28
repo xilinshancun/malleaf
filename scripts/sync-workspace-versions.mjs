@@ -38,7 +38,8 @@ for (const workspacePath of workspacePaths) {
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
   let changed = false;
 
-  if (pkg.version !== rootVersion) {
+  // MALLEAF: product packages keep their own version; upstream compatibility stays separate.
+  if (!pkg.name.startsWith("@malleaf/") && pkg.version !== rootVersion) {
     pkg.version = rootVersion;
     changed = true;
   }

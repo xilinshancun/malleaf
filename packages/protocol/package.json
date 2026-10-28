@@ -14,6 +14,11 @@
       "source": "./src/malleaf/product-identity.ts",
       "default": "./dist/malleaf/product-identity.js"
     },
+    "./malleaf/runtime-pointer": {
+      "types": "./dist/malleaf/runtime-pointer.d.ts",
+      "source": "./src/malleaf/runtime-pointer.ts",
+      "default": "./dist/malleaf/runtime-pointer.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"

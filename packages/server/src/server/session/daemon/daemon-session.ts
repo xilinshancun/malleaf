@@ -1,4 +1,10 @@
+import {
+  ControllerOwnedError,
+  type ControllerAuthority,
+} from "../../malleaf/controller-authority.js";
 import type pino from "pino";
+import type { MalleafRuntimeIdentity } from "@getpaseo/protocol/malleaf/runtime-identity";
+import { QuiesceError, type QuiesceController } from "../../malleaf/quiesce.js";
 import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import { getPidLockInfo } from "../../pid-lock.js";
@@ -14,6 +20,9 @@ import type { HubRelationshipManagement } from "../../hub/relationship-controlle
 import type { DaemonConfigReloadResult } from "../../daemon-config-store.js";
 
 export interface DaemonRuntimeConfig {
+  malleafIdentity?: MalleafRuntimeIdentity;
+  controllerAuthority?: ControllerAuthority;
+  quiesce?: QuiesceController;
   listen: string | null;
   worktreesRoot?: string;
   appBaseUrl?: string;
@@ -312,9 +321,68 @@ export class DaemonSession {
     }
   }
 
+  permitsControllerRequest(msg: SessionInboundMessage): boolean {
+    try {
+      this.daemonRuntimeConfig?.controllerAuthority?.assertRequest(msg);
+      return true;
+    } catch (error) {
+      if (!(error instanceof ControllerOwnedError)) throw error;
+      if ("requestId" in msg && typeof msg.requestId === "string")
+        this.host.emit({
+          type: "rpc_error",
+          payload: {
+            requestId: msg.requestId,
+            requestType: msg.type,
+            code: error.code,
+            error: error.message,
+          },
+        });
+      return false;
+    }
+  }
+
   async handleUpdateRequest(
     msg: Extract<SessionInboundMessage, { type: "daemon.update.request" }>,
   ): Promise<void> {
     await this.selfUpdate.dispatch(msg);
+  }
+
+  async handleQuiesceRequest(
+    msg: Extract<SessionInboundMessage, { type: "daemon.quiesce.request" }>,
+  ): Promise<void> {
+    if (!this.permitsControllerRequest(msg)) return;
+    try {
+      const quiesce = this.daemonRuntimeConfig?.quiesce;
+      if (!quiesce) throw new Error("This daemon does not support Malleaf runtime switching");
+      let status;
+      if (msg.action === "status") status = await quiesce.status();
+      else {
+        if (!msg.drainId) throw new Error("A drainId is required for begin, end and commit");
+        if (msg.action === "begin")
+          status = await quiesce.begin({
+            drainId: msg.drainId,
+            deadlineMs: msg.deadlineMs ?? 60_000,
+          });
+        else if (msg.action === "commit") status = await quiesce.commit(msg.drainId);
+        else status = await quiesce.end(msg.drainId);
+      }
+      const authority = this.daemonRuntimeConfig?.controllerAuthority;
+      if (authority && !authority.isAuthorized(msg.controllerToken))
+        status = { ...status, drainId: null, expiresAt: null };
+      this.host.emit({
+        type: "daemon.quiesce.response",
+        payload: { requestId: msg.requestId, status },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: error instanceof Error ? error.message : String(error),
+          code: error instanceof QuiesceError ? error.code : "quiesce_failed",
+        },
+      });
+    }
   }
 }

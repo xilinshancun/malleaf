@@ -47,6 +47,11 @@ const DEFAULT_CONSOLE_FORMAT: LogFormat = "json";
 const DEFAULT_FILE_LEVEL: LogLevel = "info";
 const DEFAULT_DAEMON_LOG_FILENAME = "daemon.log";
 const REDACT_PATHS = [
+  "controllerToken",
+  "*.controllerToken",
+  "*.*.controllerToken",
+  "MALLEAF_CONTROLLER_TOKEN",
+  "*.MALLEAF_CONTROLLER_TOKEN",
   "authorization",
   "Authorization",
   "headers.authorization",

@@ -1,17 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDesktopDaemonStatus, shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+import { shouldUseDesktopDaemon, type DesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
+
+import { getDaemonStartService } from "@/runtime/daemon-start-service";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import { matchesDesktopRuntimeIdentity } from "@/desktop/daemon/runtime-identity";
 
 const DESKTOP_DAEMON_SERVER_ID_QUERY_KEY = ["desktop-daemon-server-id"] as const;
 
 interface DesktopDaemonServerIdResult {
   serverId: string | null;
+  selection: DesktopDaemonStatus | null;
 }
 
 async function loadDesktopDaemonServerId(): Promise<DesktopDaemonServerIdResult> {
-  const status = await getDesktopDaemonStatus();
-  const serverId = status.serverId.trim();
+  const status = await getDaemonStartService({ store: getHostRuntimeStore() }).refreshAttachment();
+  const serverId = status?.serverId.trim() ?? "";
   return {
     serverId: serverId.length > 0 ? serverId : null,
+    selection: status,
   };
 }
 
@@ -24,7 +31,10 @@ function useLocalDaemonServerIdQuery() {
     enabled: isDesktopApp,
     staleTime: Infinity,
     gcTime: Infinity,
-    refetchInterval: (activeQuery) => (activeQuery.state.data?.serverId ? false : 1000),
+    refetchInterval: (activeQuery) => {
+      if (activeQuery.state.data?.selection?.ownership === "controller") return 2000;
+      return activeQuery.state.data?.serverId ? false : 1000;
+    },
     refetchOnMount: false,
     refetchOnReconnect: false,
     refetchOnWindowFocus: false,
@@ -64,13 +74,12 @@ export function useLocalDaemonServerIdState(): LocalDaemonServerIdState {
   return { status: "loading" };
 }
 
+export function useDesktopRuntimeSelection(): DesktopDaemonStatus | null {
+  return useLocalDaemonServerIdQuery().data?.selection ?? null;
+}
+
 export function useIsLocalDaemon(serverId: string): boolean {
-  const normalizedServerId = serverId.trim();
-  const localServerId = useLocalDaemonServerId();
-
-  if (localServerId === null || normalizedServerId.length === 0) {
-    return false;
-  }
-
-  return localServerId === normalizedServerId;
+  const selection = useDesktopRuntimeSelection();
+  const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
+  return matchesDesktopRuntimeIdentity(selection, serverId, info);
 }

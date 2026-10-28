@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { runAcceptedMalleafWork } from "../malleaf/admission.js";
 
 import type { AgentPermissionResponse, AgentPermissionResult } from "./agent-sdk-types.js";
 import { startAgentRun, type AgentRunController } from "./agent-prompt.js";
@@ -22,6 +23,12 @@ export interface RespondToAgentPermissionParams {
 export async function respondToAgentPermission(
   params: RespondToAgentPermissionParams,
 ): Promise<void> {
+  return runAcceptedMalleafWork(params.agentManager, params.agentId, () =>
+    respondToAcceptedPermission(params),
+  );
+}
+
+async function respondToAcceptedPermission(params: RespondToAgentPermissionParams): Promise<void> {
   const { agentManager, agentId, requestId, response, logger } = params;
   logger.debug(
     { agentId, requestId },

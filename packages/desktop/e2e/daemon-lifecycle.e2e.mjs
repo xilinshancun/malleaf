@@ -1,3 +1,4 @@
+import { verifyControllerOwnedDesktop } from "./daemon-ownership.e2e.mjs";
 import { verifyAttachedDaemonControls } from "./daemon-lifecycle-renderer.electron.mjs";
 import { once } from "node:events";
 import assert from "node:assert/strict";
@@ -83,6 +84,7 @@ async function command(name, args) {
   );
 }
 try {
+  await verifyControllerOwnedDesktop();
   // Simulate a legacy independent launch that carries the old Desktop flag.
   const launch = await startDaemonInstance({
     home,

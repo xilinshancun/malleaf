@@ -182,6 +182,7 @@ describe("DaemonStartService", () => {
     expect(service.isRunning()).toBe(true);
     expect(runningSnapshots).toEqual([true]);
 
+    await vi.waitFor(() => expect(resolveStart).toBeTypeOf("function"));
     resolveStart?.(makeStatus());
     await startPromise;
 
@@ -211,6 +212,7 @@ describe("DaemonStartService", () => {
     expect(service.isRunning()).toBe(true);
     expect(daemonStartCount).toBe(0);
 
+    await vi.waitFor(() => expect(resolveCondition).toBeTypeOf("function"));
     resolveCondition?.(true);
     await startPromise;
 
@@ -366,5 +368,59 @@ describe("upsertDesktopDaemonConnection", () => {
     expect(result.ok).toBe(false);
     expect(result.ok ? "" : result.error).toContain("unsupported listen address");
     expect(fake.upserts).toEqual([]);
+  });
+});
+
+describe("controller attachment", () => {
+  it.each(["running", "stopped"] as const)(
+    "attaches %s without evaluating lifecycle settings or launching",
+    async (status) => {
+      const fake = createFakeStore();
+      const start = vi.fn();
+      const condition = vi.fn(() => false);
+      const service = new DaemonStartService({
+        store: fake.store,
+        startDesktopDaemon: start,
+        getDesktopDaemonStatus: async () => makeStatus({ ownership: "controller", status }),
+      });
+      expect(await service.startIfEnabled({ shouldStart: condition })).toEqual({ ok: true });
+      expect(start).not.toHaveBeenCalled();
+      expect(condition).not.toHaveBeenCalled();
+      expect(fake.upserts).toHaveLength(status === "running" ? 1 : 0);
+    },
+  );
+
+  it("refreshes a changed managed endpoint, preserves user preferences and respects removal", async () => {
+    const host = makeRelayOnlyHost("srv_desktop");
+    host.connections.push({
+      id: "malleaf:controller",
+      type: "directTcp",
+      endpoint: "localhost:6767",
+    });
+    const hosts = [host];
+    const fake = createFakeStore(hosts);
+    let listen = "127.0.0.1:6767";
+    const service = new DaemonStartService({
+      store: fake.store,
+      getDesktopDaemonStatus: async () => makeStatus({ ownership: "controller", listen }),
+    });
+    await service.refreshAttachment();
+    expect(fake.upserts).toHaveLength(0); // Same endpoint; do not overwrite relay preference.
+    listen = "127.0.0.1:6798";
+    await service.refreshAttachment();
+    expect(fake.upserts).toEqual([
+      {
+        serverId: "srv_desktop",
+        hostname: "desktop",
+        listenAddress: listen,
+        managedByController: true,
+      },
+    ]);
+    await service.refreshAttachment();
+    expect(fake.upserts).toHaveLength(1);
+    hosts.splice(0);
+    listen = "127.0.0.1:6799";
+    await service.refreshAttachment();
+    expect(fake.upserts).toHaveLength(1);
   });
 });
