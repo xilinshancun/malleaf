@@ -158,6 +158,12 @@ export async function initializeRuntime(
           "Runner configuration changed while acquiring ownership",
         );
     }
+    // Another initializer may have finished between the initial read and our
+    // acquisition of the recorded port. Only an actual repair is "resumed".
+    if (existing && (await exists(pointerFile))) {
+      const pointer = await inspectPointer(home);
+      return { status: "already_initialized", controlPort: lease.port, pair: pointer.current };
+    }
     await lease.publishIdentity();
     store = await openPointerStore({
       home,

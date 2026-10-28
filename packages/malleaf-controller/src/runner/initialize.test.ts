@@ -4,11 +4,12 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { createRuntimeFixture, removeFixture } from "../test-fixtures/runtime.js";
 import { initializeRuntime } from "./initialize.js";
 import { acquireControlLease } from "./lease.js";
 import { exists } from "../storage.js";
+import * as storage from "../storage.js";
 import { openPointerStore } from "./pointer.js";
 
 const roots: string[] = [];
@@ -219,4 +220,30 @@ test("initialization resumes the originally recorded pair after partial publicat
     pair: first,
   });
   expect(await readFile(options.filename, "utf8")).toBe(pointer);
+});
+
+test("a pointer completed before the recorded lease is acquired is already initialized", async () => {
+  const options = await fixture();
+  const first = await options.pair("first");
+  await initializeRuntime({ home: options.home, initialPair: first });
+  const before = await readFile(options.filename, "utf8");
+  const realExists = storage.exists;
+  let missed = false;
+  const observation = vi.spyOn(storage, "exists").mockImplementation(async (filename) => {
+    if (filename === options.filename && !missed) {
+      missed = true;
+      return false; // The competing initializer publishes immediately after this observation.
+    }
+    return realExists(filename);
+  });
+  try {
+    await expect(initializeRuntime({ home: options.home })).resolves.toMatchObject({
+      status: "already_initialized",
+      pair: first,
+    });
+    expect(missed).toBe(true);
+    expect(await readFile(options.filename, "utf8")).toBe(before);
+  } finally {
+    observation.mockRestore();
+  }
 });
