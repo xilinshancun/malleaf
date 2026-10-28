@@ -7,12 +7,13 @@ import { isWithin, StorageError } from "./storage.js";
 import { verifySlot } from "./slot/materialize.js";
 import { readRunnerConfiguration } from "./runner/initialize.js";
 import { acquireControlLease } from "./runner/lease.js";
-import { openPointerStore } from "./runner/pointer.js";
+import { inspectPointer, openPointerStore } from "./runner/pointer.js";
 import { openSwitchJournal } from "./runner/journal.js";
 import { openInstanceLedger } from "./runner/instances.js";
 import { createIsolatedActivation } from "./runtime/activation.js";
 import { acceptanceBootEnvironment } from "./runtime/boot-environment.js";
 import { assertAcceptanceBoundary } from "./isolation.js";
+import { createAcceptanceSession, acceptanceStatus } from "./runner/acceptance-session.js";
 
 let stopping = false;
 let resolveStop!: () => void;
@@ -91,6 +92,8 @@ async function bootOptions() {
       home: { type: "string" },
       "acceptance-root": { type: "string" },
       "control-port": { type: "string" },
+      verify: { type: "boolean" },
+      "boot-reason": { type: "string", default: "cold" },
     },
   });
   if (
@@ -119,22 +122,72 @@ async function bootOptions() {
       "Controller boot requires temporary product and OS homes",
     );
   const slotDirectory = path.resolve(import.meta.dirname, "../../..");
+  if (!["cold", "handoff"].includes(values["boot-reason"] ?? ""))
+    throw new StorageError("invalid_state", "Unknown controller boot reason");
   const buildId = path.basename(slotDirectory);
   await verifySlot({ directory: slotDirectory, expectedBuildId: buildId, mode: "entries" });
-  return { home, root, fakeHome, buildId, controlPort: values["control-port"] };
+  return {
+    home,
+    root,
+    fakeHome,
+    buildId,
+    controlPort: values["control-port"],
+    verify: values.verify === true,
+    bootReason: values["boot-reason"],
+  };
 }
 
-async function main() {
-  const { home, root, fakeHome, buildId, controlPort } = await bootOptions();
-  // Import/argument failures can fall back; no lease or state mutation occurs
-  // until the parent has chosen the no-fallback side of its IPC boundary.
-  if (!(await awaitAdmission(buildId)) || stopping) return;
+async function verifyBootState(home: string, controlPort: string | undefined) {
   const config = await readRunnerConfiguration(home);
+  const pointer = await inspectPointer(home);
   if (String(config.controlPort) !== controlPort)
     throw new StorageError(
       "state_conflict",
       "Stable runner control port does not match persisted configuration",
     );
+  if (config.minWriterVersion > 1 || pointer.minWriterVersion > 1)
+    throw new StorageError("unsupported_schema", "Controller cannot write this runtime state");
+  return config;
+}
+
+function sendVerification(buildId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!process.send || !process.connected) {
+      reject(new Error("Controller self-check requires IPC"));
+      return;
+    }
+    process.send({ type: "malleaf.controller.verified", buildId }, (error: Error | null) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function sendIpc(message: object): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!process.send || !process.connected) {
+      resolve(false);
+      return;
+    }
+    try {
+      process.send(message, (error: Error | null) => resolve(!error));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function main() {
+  const { home, root, fakeHome, buildId, controlPort, verify, bootReason } = await bootOptions();
+  if (verify) {
+    await verifyBootState(home, controlPort);
+    await sendVerification(buildId);
+    return;
+  }
+  // Import/argument failures can fall back; no lease or state mutation occurs
+  // until the parent has chosen the no-fallback side of its IPC boundary.
+  if (!(await awaitAdmission(buildId)) || stopping) return;
+  const config = await verifyBootState(home, controlPort);
   const lease = await acquireControlLease({
     home,
     port: config.controlPort,
@@ -145,6 +198,9 @@ async function main() {
   let journal: Awaited<ReturnType<typeof openSwitchJournal>> | undefined;
   let ledger: Awaited<ReturnType<typeof openInstanceLedger>> | undefined;
   let activation: Awaited<ReturnType<typeof createIsolatedActivation>> | undefined;
+  let acceptance: ReturnType<typeof createAcceptanceSession> | undefined;
+  let commandListener: ((message: unknown) => void) | undefined;
+  let cleanExitCode = 0;
   try {
     if (stopping) return;
     await lease.publishIdentity();
@@ -173,12 +229,81 @@ async function main() {
       },
       policy: { schemaVersion: 1, entries: {} },
     });
-    const recovered = await activation.recover();
-    process.stdout.write(
-      `${JSON.stringify({ type: "malleaf.controller.ready", pid: process.pid, buildId, current: recovered.pointer.current, trial: recovered.pointer.trial, step: recovered.transaction?.step ?? null })}\n`,
-    );
+    const active = activation;
+    const ownedPointer = pointer;
+    const ownedJournal = journal;
+    let current: Awaited<ReturnType<typeof active.recover>> & { paused?: boolean } =
+      await active.recover({ attachOnly: bootReason === "handoff" });
+    acceptance = createAcceptanceSession({
+      buildId,
+      send: sendIpc,
+      isStopping: () => stopping,
+      onHandoff: () => {
+        cleanExitCode = 75;
+        requestStop();
+      },
+      execute: async (request) => {
+        switch (request.command) {
+          case "activate":
+            current = await active.activate(request.params);
+            break;
+          case "keep":
+            current = await active.keep(request.params.switchId);
+            break;
+          case "revert":
+            current = await active.revert(request.params.switchId);
+            break;
+          case "status":
+            current = {
+              ...current,
+              pointer: await ownedPointer.read(),
+              transaction: (await ownedJournal.read()).transaction,
+            };
+            break;
+        }
+        return {
+          pointer: current.pointer,
+          transaction: current.transaction,
+          instance: current.runtime?.instance ?? null,
+          runtimeIdentity: current.runtime?.info.malleaf ?? null,
+          ...(await acceptanceStatus(
+            () =>
+              current.runtime?.client.quiesceDaemon({ action: "status", deadlineMs: 1000 }) ??
+              Promise.resolve(null),
+          )),
+          paused: current.paused ?? false,
+        };
+      },
+    });
+    const session = acceptance;
+    commandListener = (message: unknown) => {
+      if (
+        message &&
+        typeof message === "object" &&
+        "type" in message &&
+        message.type === "malleaf.controller.request"
+      )
+        void session
+          .handle(message)
+          .catch((error) =>
+            process.stderr.write(`Acceptance command delivery failed: ${String(error)}\n`),
+          );
+    };
+    process.on("message", commandListener);
+    const ready = {
+      type: "malleaf.controller.ready",
+      pid: process.pid,
+      buildId,
+      current: current.pointer.current,
+      trial: current.pointer.trial,
+      step: current.transaction?.step ?? null,
+    };
+    await sendIpc(ready);
+    process.stdout.write(`${JSON.stringify(ready)}\n`);
     await stopRequested;
   } finally {
+    if (commandListener) process.off("message", commandListener);
+    await acceptance?.settle();
     // A controller restart leaves the exact registered daemon detached and alive.
     try {
       await activation?.disconnect();
@@ -192,6 +317,7 @@ async function main() {
       });
     }
   }
+  process.exitCode = cleanExitCode;
 }
 
 main()

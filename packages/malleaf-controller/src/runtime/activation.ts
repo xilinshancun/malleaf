@@ -32,6 +32,7 @@ import { drainAndCommit, hasPendingDrainWork } from "./drain.js";
 import { preparePreflight } from "./preflight.js";
 import { epochHome, inspectRecovery, type RecoveryPlan } from "./recovery.js";
 import { assertAcceptanceBoundary } from "../isolation.js";
+import { verifyCandidateController } from "./controller-probe.js";
 
 type PointerStore = Awaited<ReturnType<typeof openPointerStore>>;
 type Journal = Awaited<ReturnType<typeof openSwitchJournal>>;
@@ -207,6 +208,19 @@ export async function createIsolatedActivation(options: {
   }
   async function preflight(transaction: SwitchTransaction) {
     await journal.advance(transaction.switchId, "preflight");
+    try {
+      await verifyCandidateController({
+        slotDirectory: slot(transaction.candidate),
+        buildId: transaction.candidate.buildId,
+        home,
+        acceptanceRoot: root,
+        environment: options.environment,
+        assertOwned,
+      });
+    } catch (error) {
+      await journal.advance(transaction.switchId, "aborted", String(error));
+      throw error;
+    }
     const scratch = await preparePreflight({
       slotDirectory: slot(transaction.candidate),
       scratchRoot: root,
@@ -271,7 +285,11 @@ export async function createIsolatedActivation(options: {
     if (blocked) await journal.advance(transaction.switchId, "blocked", error);
     else await journal.afterPointer(transaction.switchId, "rolled_back", pointer.read);
   }
-  async function attachRecovery(plan: RecoveryPlan, transaction: SwitchTransaction | null) {
+  async function attachRecovery(
+    plan: RecoveryPlan,
+    transaction: SwitchTransaction | null,
+    attachOnly = false,
+  ) {
     if (!plan.attach) return false;
     const expected = plan.attach.instance;
     if (!expected) throw new StorageError("state_conflict", "Recovery cannot attach an intent");
@@ -280,6 +298,8 @@ export async function createIsolatedActivation(options: {
     running = { pair: plan.target, role: await roleOf(plan.attach), handle };
     const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
     if (status.state === "shutdown") {
+      if (attachOnly)
+        throw new StorageError("state_conflict", "Handoff cannot restart a frozen daemon");
       await stopRegistered(plan.attach);
       return true;
     }
@@ -319,7 +339,7 @@ export async function createIsolatedActivation(options: {
     if (plan.action === "trial" && transaction?.step === "probing")
       await journal.afterPointer(transaction.switchId, "trial", pointer.read);
   }
-  async function recover() {
+  async function recover(recoveryOptions: { attachOnly?: boolean } = {}) {
     const state = await pointer.read();
     const transaction = (await journal.read()).transaction;
     const plan = await inspectRecovery({
@@ -328,6 +348,18 @@ export async function createIsolatedActivation(options: {
       transaction,
       ledger: await ledger.read(),
     });
+    if (
+      recoveryOptions.attachOnly &&
+      (!plan.attach ||
+        plan.stop.length ||
+        state.trial ||
+        !samePair(plan.target, state.current) ||
+        !["current", "committed"].includes(plan.action))
+    )
+      throw new StorageError(
+        "state_conflict",
+        "Handoff requires a registered live selected daemon; launch or recovery actions are unavailable",
+      );
     // Inspection above finishes before the first stop or launch.
     for (const registration of plan.stop) await stopRegistered(registration);
     for (const role of ["preflight", "baseline", "candidate"] as const) {
@@ -338,7 +370,7 @@ export async function createIsolatedActivation(options: {
       await running.handle.client.close();
       running = null;
     }
-    const frozenTrial = await attachRecovery(plan, transaction);
+    const frozenTrial = await attachRecovery(plan, transaction, recoveryOptions.attachOnly);
     if (frozenTrial && state.trial && transaction) {
       await rollback(transaction);
       return result();
@@ -522,7 +554,8 @@ export async function createIsolatedActivation(options: {
     return result();
   }
   return {
-    recover: () => serialize(recover),
+    recover: (recoveryOptions?: { attachOnly?: boolean }) =>
+      serialize(() => recover(recoveryOptions)),
     activate: (request: ActivationRequest) => serialize(() => activate(request)),
     keep: (switchId: string) => serialize(() => keep(switchId)),
     revert: (switchId: string) => serialize(() => revert(switchId)),

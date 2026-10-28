@@ -20,6 +20,13 @@ const fake = vi.hoisted(() => ({
   fail: null as null | { dataId: string; cleanup: "verified" | "unverified" },
   ordinal: 0,
   failBootEnd: false,
+  failController: false,
+}));
+
+vi.mock("./controller-probe.js", () => ({
+  verifyCandidateController: async () => {
+    if (fake.failController) throw new Error("controller self-check rejected");
+  },
 }));
 
 vi.mock("./daemon.js", async (importOriginal) => {
@@ -128,6 +135,7 @@ afterEach(async () => {
   fake.events.length = 0;
   fake.fail = null;
   fake.failBootEnd = false;
+  fake.failController = false;
   for (const root of roots.splice(0)) await removeFixture(root);
 });
 
@@ -209,6 +217,38 @@ test("healthy trial, keep and repeated request preserve the original epoch", asy
   );
   await expect(f.controller.activate({ ...f.request, drainId: randomUUID() })).rejects.toThrow(
     "different arguments",
+  );
+});
+
+test("candidate controller self-check failure aborts before daemon preflight or baseline drain", async () => {
+  const f = await fixture();
+  fake.events.length = 0;
+  fake.failController = true;
+  await expect(f.controller.activate(f.request)).rejects.toThrow("controller self-check rejected");
+  expect((await f.journal.read()).transaction?.step).toBe("aborted");
+  expect((await f.pointer.read()).current).toEqual(f.baseline);
+  expect((await f.pointer.read()).trial).toBeNull();
+  expect(fake.events).toEqual([]);
+});
+
+test("handoff recovery attaches but cannot launch or restart a frozen selected daemon", async () => {
+  const f = await fixture();
+  await f.controller.disconnect();
+  const next = await createIsolatedActivation(f);
+  const attached = await next.recover({ attachOnly: true });
+  expect(attached.runtime?.instance).toEqual(f.initial.runtime?.instance);
+  const home = path.join(f.home, "data/baseline");
+  fake.status.get(await realpath(home))!.state = "shutdown";
+  await next.disconnect();
+  const frozen = await createIsolatedActivation(f);
+  fake.events.length = 0;
+  await expect(frozen.recover({ attachOnly: true })).rejects.toThrow("frozen daemon");
+  expect(fake.events).not.toContain("stop:baseline");
+  await frozen.disconnect();
+  await f.initial.runtime?.stop();
+  const absent = await createIsolatedActivation(f);
+  await expect(absent.recover({ attachOnly: true })).rejects.toThrow(
+    "registered live selected daemon",
   );
 });
 
