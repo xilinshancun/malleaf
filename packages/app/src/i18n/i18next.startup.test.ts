@@ -49,6 +49,7 @@ function runStartupProbe(actions = "") {
            language: i18n.language,
            cancel: i18n.t("common.actions.cancel"),
            fallback: i18n.t("startupProbeOnlyInEnglish"),
+           controllerManaged: i18n.t("malleaf:controllerManaged"),
          }));`,
     }),
   );
@@ -61,6 +62,7 @@ describe("bundled translation startup", () => {
       registered: ["en"],
       language: "en",
       cancel: "Cancel",
+      controllerManaged: "Managed by Malleaf controller",
     });
   });
 
@@ -87,6 +89,8 @@ describe("bundled translation startup", () => {
       language: locale,
       cancel,
       fallback: "English fallback",
+      controllerManaged:
+        locale === "zh-CN" ? "由 Malleaf 控制器管理" : "Managed by Malleaf controller",
     });
   });
 });

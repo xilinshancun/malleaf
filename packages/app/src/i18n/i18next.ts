@@ -12,7 +12,10 @@ const bundledTranslations: BackendModule = {
   init() {},
   read(language, namespace, callback) {
     if (namespace === "malleaf") {
-      callback(null, language === "zh-CN" ? malleafTranslations["zh-CN"] : malleafTranslations.en);
+      callback(
+        null,
+        language === "en" || language === "zh-CN" ? malleafTranslations[language] : undefined,
+      );
       return;
     }
     switch (language) {
