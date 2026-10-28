@@ -16,6 +16,7 @@ import {
 } from "@getpaseo/client/internal/daemon-client";
 import {
   connectionFromListen,
+  MALLEAF_CONTROLLER_CONNECTION_ID,
   createRemoteSshHostConnection,
   normalizeStoredHostProfile,
   pinRelayProtectedSecurityInProfiles,
@@ -2168,6 +2169,7 @@ export class HostRuntimeStore {
     listenAddress: string;
     serverId: string;
     hostname: string | null;
+    managedByController?: boolean;
   }): Promise<HostProfile> {
     const normalizedListenAddress = input.listenAddress.trim();
     const serverId = input.serverId.trim();
@@ -2181,7 +2183,10 @@ export class HostRuntimeStore {
     return this.upsertHostConnection({
       serverId,
       label: input.hostname ?? undefined,
-      connection,
+      connection: input.managedByController
+        ? { ...connection, id: MALLEAF_CONTROLLER_CONNECTION_ID }
+        : connection,
+      preferConnection: input.managedByController,
     });
   }
 
@@ -2295,9 +2300,10 @@ export class HostRuntimeStore {
     password?: string;
     connection: HostConnection;
     existingClient?: DaemonClient;
+    preferConnection?: boolean;
   }): Promise<HostProfile> {
     const now = new Date().toISOString();
-    const next = upsertHostConnectionInProfiles({
+    let next = upsertHostConnectionInProfiles({
       profiles: this.hosts,
       serverId: input.serverId,
       label: input.label,
@@ -2305,6 +2311,13 @@ export class HostRuntimeStore {
       password: input.password,
       now,
     });
+    if (input.preferConnection) {
+      next = next.map((host) =>
+        host.serverId === input.serverId
+          ? { ...host, preferredConnectionId: input.connection.id }
+          : host,
+      );
+    }
     this.setHostsAndSync(next, {
       initialConnectionByServerId: input.existingClient
         ? new Map([

@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
+import {
+  resolveDesktopDaemonSelection,
+  type DesktopDaemonSelection,
+} from "@getpaseo/server/malleaf-runtime";
 import path from "node:path";
 import { app, ipcMain, powerMonitor } from "electron";
 import log from "electron-log/main";
 import {
-  resolvePaseoHome,
   startDaemonInstance,
   DaemonInstanceError,
   stopDaemonInstance,
@@ -84,6 +87,10 @@ export interface DesktopDaemonStatus {
   ownedByDesktop: boolean;
   startedAt: string | null;
   error: string | null;
+  // COMPAT(malleaf-desktop-ownership): optional for older renderers.
+  ownership?: "desktop" | "controller";
+  dataId?: string;
+  expectedBuildId?: string;
 }
 
 interface DesktopDaemonLogs {
@@ -123,12 +130,28 @@ function parseDesktopDaemonStopReason(
 // Utilities
 // ---------------------------------------------------------------------------
 
-function getPaseoHome(): string {
-  return resolvePaseoHome(process.env);
+function getDaemonSelection() {
+  return resolveDesktopDaemonSelection({ env: process.env, readInstance: readDaemonInstance });
 }
 
-function logFilePath(): string {
-  return path.join(getPaseoHome(), DAEMON_LOG_FILENAME);
+function selectedHome(selection: DesktopDaemonSelection): string {
+  if (selection.ownership === "controller" && (selection.error || !selection.daemonHome))
+    throw new Error(selection.error ?? "Controller runtime selection is unavailable");
+  return selection.daemonHome!;
+}
+
+function ownershipFields(selection: DesktopDaemonSelection) {
+  return {
+    ownership: selection.ownership,
+    ...(selection.ownership === "controller" && selection.pair
+      ? { dataId: selection.pair.dataId, expectedBuildId: selection.pair.buildId }
+      : {}),
+  };
+}
+
+function assertDesktopOwnership(selection: DesktopDaemonSelection) {
+  if (selection.ownership === "controller")
+    throw new Error("This runtime is managed by the Malleaf controller. Use its version controls.");
 }
 
 export function isDesktopManagedDaemonRunningSync(): boolean {
@@ -221,13 +244,33 @@ function resolveDesktopAppVersion(): string {
 // ---------------------------------------------------------------------------
 
 export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus> {
-  const home = getPaseoHome();
-
+  const selection = await getDaemonSelection();
+  const home = selection.daemonHome ?? "";
+  const ownership = ownershipFields(selection);
   try {
+    selectedHome(selection);
+    if (selection.ownership === "controller") {
+      // Selection already observed the exact live pid lock. Do not invoke the
+      // bundled CLI (or provider discovery) to follow a separately managed slot.
+      const instance = selection.instance;
+      let localDaemon = "stopped";
+      if (instance) localDaemon = instance.listen ? "running" : "not_ready";
+      return {
+        ...statusFromDaemonProbe(
+          {
+            ...instance,
+            localDaemon,
+          },
+          home,
+        ),
+        ...ownership,
+        ownedByDesktop: false,
+      };
+    }
     // The app polls this while no local daemon runs. Answer that case in-process,
     // since launching the CLI once per poll keeps spawning processes while idle.
     if (!(await readDaemonInstance(home))) {
-      return statusFromDaemonProbe({ localDaemon: "stopped" }, home);
+      return { ...statusFromDaemonProbe({ localDaemon: "stopped" }, home), ...ownership };
     }
 
     const payload = (await runExternalCliJsonCommand([
@@ -237,7 +280,10 @@ export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus>
       home,
       "--json",
     ])) as Record<string, unknown>;
-    return statusFromDaemonProbe(payload, home);
+    return {
+      ...statusFromDaemonProbe(payload, home),
+      ...ownership,
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logDesktopDaemonLifecycle("resolveStatus failed", { error: errorMessage });
@@ -253,6 +299,7 @@ export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus>
       ownedByDesktop: false,
       startedAt: null,
       error: errorMessage,
+      ...ownership,
     };
   }
 }
@@ -277,9 +324,9 @@ function assertBuiltInDaemonManagementEnabled(settings: DesktopSettings): void {
 }
 
 async function startDaemon(): Promise<DesktopDaemonStatus> {
-  assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
-
   const current = await resolveDesktopDaemonStatus();
+  if (current.ownership === "controller") return current;
+  assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
   logDesktopDaemonLifecycle("initial status check before start", {
     status: current.status,
     pid: current.pid,
@@ -300,7 +347,9 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
     }
   }
 
-  const home = getPaseoHome();
+  const selection = await getDaemonSelection();
+  if (selection.ownership === "controller") return resolveDesktopDaemonStatus();
+  const home = selectedHome(selection);
   const invocation = createNodeEntrypointInvocation({
     entrypoint: resolveDaemonRunnerEntrypoint(),
     argvMode: "node-script",
@@ -333,7 +382,14 @@ export async function stopDesktopDaemon(
   reason: DesktopDaemonStopReason = DEFAULT_DESKTOP_DAEMON_STOP_REASON,
   confirmedInstance?: { pid: number; startedAt: string },
 ): Promise<DesktopDaemonStatus> {
-  const home = getPaseoHome();
+  const selection = await getDaemonSelection();
+  if (
+    selection.ownership === "controller" &&
+    ["quit", "app_update", "version_mismatch"].includes(reason)
+  )
+    return resolveDesktopDaemonStatus();
+  assertDesktopOwnership(selection);
+  const home = selectedHome(selection);
   const instance = await readDaemonInstance(home);
   const owned = Boolean(
     instance &&
@@ -365,12 +421,23 @@ export async function stopDesktopDaemon(
 }
 
 async function restartDaemon(): Promise<DesktopDaemonStatus> {
-  await runExternalCliJsonCommand(["daemon", "restart", "--home", getPaseoHome(), "--json"]);
+  const selection = await getDaemonSelection();
+  assertDesktopOwnership(selection);
+  await runExternalCliJsonCommand([
+    "daemon",
+    "restart",
+    "--home",
+    selectedHome(selection),
+    "--json",
+  ]);
   return resolveDesktopDaemonStatus();
 }
 
-function getDaemonLogs(): DesktopDaemonLogs {
-  const logPath = logFilePath();
+async function getDaemonLogs(): Promise<DesktopDaemonLogs> {
+  const selection = await getDaemonSelection();
+  if (selection.ownership === "controller" && selection.error)
+    return { logPath: "", contents: selection.error };
+  const logPath = path.join(selectedHome(selection), DAEMON_LOG_FILENAME);
   return {
     logPath,
     contents: tailFile(logPath, 100),
@@ -378,7 +445,10 @@ function getDaemonLogs(): DesktopDaemonLogs {
 }
 
 async function getCliDaemonStatus(): Promise<string> {
-  return await runExternalCliTextCommand(["daemon", "status", "--home", getPaseoHome()]);
+  const selection = await getDaemonSelection();
+  if (selection.ownership === "controller")
+    return JSON.stringify(await resolveDesktopDaemonStatus(), null, 2);
+  return runExternalCliTextCommand(["daemon", "status", "--home", selectedHome(selection)]);
 }
 
 async function getLocalDaemonVersion(): Promise<{ version: string | null; error: string | null }> {
@@ -411,9 +481,17 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
     desktop_local_credential: async (args) => {
-      const instance = await readDaemonInstance(getPaseoHome());
-      if (!instance?.desktopManaged || typeof args?.listen !== "string") return null;
-      return readLocalCredentialForTarget(getPaseoHome(), args.listen);
+      const selection = await getDaemonSelection();
+      if (selection.ownership === "controller" && selection.error) return null;
+      const home = selectedHome(selection);
+      const instance = await readDaemonInstance(home);
+      if (
+        !instance ||
+        typeof args?.listen !== "string" ||
+        (selection.ownership === "desktop" && !instance.desktopManaged)
+      )
+        return null;
+      return readLocalCredentialForTarget(home, args.listen);
     },
     start_desktop_daemon: () => startDaemon(),
     stop_desktop_daemon: (args) =>

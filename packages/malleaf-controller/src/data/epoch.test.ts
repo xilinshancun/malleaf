@@ -47,6 +47,8 @@ test("copies unknown durable state and identities, removes runtime files, leaves
   await writeFile(path.join(options.sourceHome, "local-credential"), "do-not-copy");
   await mkdir(path.join(options.sourceHome, "runtime"));
   await writeFile(path.join(options.sourceHome, "runtime/process.json"), '{"pid":123}');
+  await mkdir(path.join(options.sourceHome, "desktop-attachments"));
+  await writeFile(path.join(options.sourceHome, "desktop-attachments/draft.txt"), "client draft");
   const plan = await planEpochCopy(options);
   expect(plan.blockers).toEqual([]);
   const epoch = await executeEpochCopy(plan);
@@ -59,6 +61,10 @@ test("copies unknown durable state and identities, removes runtime files, leaves
   );
   expect(await readdir(epoch.directory)).not.toContain("local-credential");
   expect(await readdir(epoch.directory)).not.toContain("runtime");
+  expect(await readdir(epoch.directory)).not.toContain("desktop-attachments");
+  expect(
+    await readFile(path.join(options.sourceHome, "desktop-attachments/draft.txt"), "utf8"),
+  ).toBe("client draft");
   expect(await readFile(path.join(options.sourceHome, "local-credential"), "utf8")).toBe(
     "do-not-copy",
   );

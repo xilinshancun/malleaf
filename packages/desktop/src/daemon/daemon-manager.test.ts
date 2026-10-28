@@ -84,6 +84,8 @@ describe("daemon-manager commands", () => {
   beforeEach(() => {
     fixtureRoot = mkdtempSync(path.join(tmpdir(), "paseo daemon manager "));
     mocks.paseoHome = path.join(fixtureRoot, "home");
+    vi.stubEnv("MALLEAF_HOME", fixtureRoot);
+    vi.stubEnv("MALLEAF_DAEMON_HOME", mocks.paseoHome);
     mocks.appLogPath = path.join(fixtureRoot, "main.log");
     mocks.settings = DEFAULT_DESKTOP_SETTINGS;
     mocks.runExternalCliJsonCommand.mockReset();
@@ -98,6 +100,7 @@ describe("daemon-manager commands", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
@@ -174,5 +177,91 @@ describe("daemon-manager commands", () => {
     expect(await handler({ listen: "remote:6799" })).toBeNull();
     writeFileSync(lockPath, JSON.stringify({ ...lock, desktopManaged: false }));
     expect(await handler({ listen: "localhost:6799" })).toBeNull();
+  });
+  function controllerPointer(corrupt = false) {
+    mkdirSync(path.join(fixtureRoot, "runner"), { recursive: true });
+    mkdirSync(path.join(fixtureRoot, "data/current"), { recursive: true });
+    writeFileSync(
+      path.join(fixtureRoot, "runner/current.json"),
+      corrupt
+        ? "{"
+        : JSON.stringify({
+            schemaVersion: 1,
+            minReaderVersion: 1,
+            current: { buildId: "a".repeat(64), dataId: "current" },
+            trial: null,
+          }),
+    );
+  }
+
+  it.each([false, true])(
+    "never starts a daemon for a controller pointer, including corrupt=%s",
+    async (corrupt) => {
+      controllerPointer(corrupt);
+      const handlers = createDaemonCommandHandlers();
+      const status = await handlers.start_desktop_daemon();
+      expect(status).toMatchObject({
+        ownership: "controller",
+        status: corrupt ? "errored" : "stopped",
+        ownedByDesktop: false,
+      });
+      expect(mocks.createNodeEntrypointInvocation).not.toHaveBeenCalled();
+      expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reads controller credentials and status from the selected epoch without a CLI probe", async () => {
+    controllerPointer();
+    const home = path.join(fixtureRoot, "data/current");
+    const token = "c".repeat(43);
+    writeFileSync(path.join(home, "local-credential"), token);
+    writeFileSync(
+      path.join(home, "paseo.pid"),
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        hostname: hostname(),
+        uid: process.getuid?.() ?? 0,
+        listen: "127.0.0.1:6799",
+        serverId: "controller-server",
+        desktopManaged: false,
+      }),
+    );
+    const handlers = createDaemonCommandHandlers();
+    await expect(handlers.start_desktop_daemon()).resolves.toMatchObject({
+      ownership: "controller",
+      status: "running",
+      serverId: "controller-server",
+      pid: process.pid,
+      expectedBuildId: "a".repeat(64),
+      dataId: "current",
+      ownedByDesktop: false,
+    });
+    await expect(handlers.desktop_local_credential({ listen: "localhost:6799" })).resolves.toBe(
+      token,
+    );
+    await expect(handlers.desktop_local_credential({ listen: "remote:6799" })).resolves.toBeNull();
+    expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
+    expect(JSON.parse(await handlers.cli_daemon_status())).toMatchObject({
+      ownership: "controller",
+      pid: process.pid,
+    });
+    expect(mocks.runExternalCliTextCommand).not.toHaveBeenCalled();
+  });
+
+  it("controller ownership blocks explicit lifecycle commands while quit/update leave it alone", async () => {
+    controllerPointer();
+    const handlers = createDaemonCommandHandlers();
+    await expect(handlers.restart_desktop_daemon()).rejects.toThrow(/Malleaf controller/);
+    await expect(handlers.stop_desktop_daemon({ reason: "manual_ipc" })).rejects.toThrow(
+      /Malleaf controller/,
+    );
+    for (const reason of ["quit", "app_update", "version_mismatch"]) {
+      await expect(handlers.stop_desktop_daemon({ reason })).resolves.toMatchObject({
+        ownership: "controller",
+        status: "stopped",
+      });
+    }
+    expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
   });
 });

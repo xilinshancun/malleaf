@@ -44,6 +44,7 @@ const runtimeEntries = new Set([
   "runtime",
   "uploads",
   "agent-timelines",
+  "desktop-attachments", // Client drafts belong to Electron userData, not an epoch.
   "epoch.json",
 ]);
 export function isRuntimeEntry(name: string): boolean {

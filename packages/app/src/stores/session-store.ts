@@ -277,6 +277,7 @@ export interface DaemonServerInfo {
   desktopManaged?: boolean;
   capabilities?: ServerCapabilities;
   features?: ServerInfoStatusPayload["features"];
+  malleaf?: ServerInfoStatusPayload["malleaf"];
 }
 
 export function toDaemonServerInfo(serverInfo: ServerInfoStatusPayload): DaemonServerInfo {
@@ -289,6 +290,7 @@ export function toDaemonServerInfo(serverInfo: ServerInfoStatusPayload): DaemonS
       : {}),
     ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
     ...(serverInfo.features ? { features: serverInfo.features } : {}),
+    ...(serverInfo.malleaf ? { malleaf: serverInfo.malleaf } : {}),
   };
 }
 
@@ -705,6 +707,7 @@ function isSessionServerInfoUnchanged(input: {
   nextCapabilities: ServerCapabilities | undefined;
   nextFeatures: ServerInfoStatusPayload["features"] | undefined;
   nextServerId: string;
+  nextMalleaf: ServerInfoStatusPayload["malleaf"];
 }): boolean {
   const {
     currentServerInfo,
@@ -718,6 +721,7 @@ function isSessionServerInfoUnchanged(input: {
   const prevVersion = currentServerInfo?.version?.trim() || null;
   return (
     currentServerInfo?.serverId === input.nextServerId &&
+    JSON.stringify(currentServerInfo?.malleaf) === JSON.stringify(input.nextMalleaf) &&
     prevHostname === nextHostname &&
     prevVersion === nextVersion &&
     currentServerInfo?.desktopManaged === nextDesktopManaged &&
@@ -870,6 +874,7 @@ export const useSessionStore = create<SessionStore>()(
               nextCapabilities,
               nextFeatures,
               nextServerId: info.serverId,
+              nextMalleaf: info.malleaf,
             })
           ) {
             return prev;
@@ -890,6 +895,7 @@ export const useSessionStore = create<SessionStore>()(
                     : {}),
                   ...(nextCapabilities ? { capabilities: nextCapabilities } : {}),
                   ...(nextFeatures ? { features: nextFeatures } : {}),
+                  ...(info.malleaf ? { malleaf: info.malleaf } : {}),
                 },
               },
             },

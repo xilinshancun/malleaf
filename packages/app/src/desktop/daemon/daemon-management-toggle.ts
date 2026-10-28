@@ -14,9 +14,12 @@ export type DaemonManagementToggleResult =
 
 export async function executeDaemonManagementToggle(
   currentlyManaging: boolean,
-  daemonStatus: Pick<DesktopDaemonStatus, "status" | "ownedByDesktop"> | null,
+  daemonStatus: Pick<DesktopDaemonStatus, "status" | "ownedByDesktop" | "ownership"> | null,
   deps: DaemonManagementToggleDeps,
 ): Promise<DaemonManagementToggleResult> {
+  if (daemonStatus?.ownership === "controller") {
+    return { kind: "cancelled" };
+  }
   if (!currentlyManaging) {
     await deps.persistSettings({ manageBuiltInDaemon: true });
     const newStatus = await deps.startDaemon();

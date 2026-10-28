@@ -16,6 +16,7 @@ import {
   getCliDaemonStatus,
   shouldUseDesktopDaemon,
   confirmAndStopDesktopDaemon,
+  type DesktopDaemonStatus,
 } from "@/desktop/daemon/desktop-daemon";
 import { useBuiltInDaemonManagement } from "@/desktop/hooks/use-built-in-daemon-management";
 import { useDaemonStatus } from "@/desktop/hooks/use-daemon-status";
@@ -203,6 +204,7 @@ interface DaemonInfoCardProps {
   daemonStatusStateText: string;
   daemonStatusDetailText: string;
   isDaemonManagementPaused: boolean;
+  controllerOwned: boolean;
   copyIcon: ReactElement;
   fileTextIcon: ReactElement;
   activityIcon: ReactElement;
@@ -224,6 +226,7 @@ function DaemonInfoCard(props: DaemonInfoCardProps) {
     daemonStatusStateText,
     daemonStatusDetailText,
     isDaemonManagementPaused,
+    controllerOwned,
     copyIcon,
     fileTextIcon,
     activityIcon,
@@ -254,12 +257,16 @@ function DaemonInfoCard(props: DaemonInfoCardProps) {
       <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
         <View style={settingsStyles.rowContent}>
           <Text style={settingsStyles.rowTitle}>{t("desktop.daemon.management.title")}</Text>
-          <Text style={settingsStyles.rowHint}>{t("desktop.daemon.management.hint")}</Text>
+          <Text style={settingsStyles.rowHint}>
+            {controllerOwned
+              ? t("malleaf:controllerManagedHint")
+              : t("desktop.daemon.management.hint")}
+          </Text>
         </View>
         <Switch
           value={!isDaemonManagementPaused}
           onValueChange={handleToggleDaemonManagement}
-          disabled={isUpdatingDaemonManagement}
+          disabled={isUpdatingDaemonManagement || controllerOwned}
           accessibilityLabel={t("desktop.daemon.management.title")}
         />
       </View>
@@ -271,7 +278,7 @@ function DaemonInfoCard(props: DaemonInfoCardProps) {
         <Switch
           value={keepRunningAfterQuit}
           onValueChange={handleToggleKeepRunningAfterQuit}
-          disabled={isUpdatingKeepRunningAfterQuit}
+          disabled={isUpdatingKeepRunningAfterQuit || controllerOwned}
           accessibilityLabel={t("desktop.daemon.keepRunning.title")}
         />
       </View>
@@ -318,6 +325,41 @@ function DaemonInfoCard(props: DaemonInfoCardProps) {
   );
 }
 
+function DaemonOwnershipCard({
+  status,
+  isStopping,
+  onStop,
+}: {
+  status: DesktopDaemonStatus | null;
+  isStopping: boolean;
+  onStop: () => void;
+}) {
+  const { t } = useTranslation();
+  const controllerOwned = status?.ownership === "controller";
+  if (!status?.pid && !controllerOwned) return null;
+  let title = "desktop.daemon.lifecycle.attached";
+  if (status?.ownedByDesktop) title = "desktop.daemon.lifecycle.owned";
+  if (controllerOwned) title = "malleaf:controllerManaged";
+  return (
+    <View style={settingsStyles.card}>
+      <View style={settingsStyles.row}>
+        <View style={settingsStyles.rowContent}>
+          <Text style={settingsStyles.rowTitle}>{t(title)}</Text>
+          <Text style={settingsStyles.rowHint}>{status?.home}</Text>
+        </View>
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={onStop}
+          disabled={isStopping || controllerOwned}
+        >
+          {isStopping ? t("desktop.daemon.lifecycle.stopping") : t("desktop.daemon.lifecycle.stop")}
+        </Button>
+      </View>
+    </View>
+  );
+}
+
 export function LocalDaemonSection() {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
@@ -346,9 +388,11 @@ export function LocalDaemonSection() {
       .finally(() => setIsStopping(false));
   }, [setStatus, t]);
 
-  const daemonVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
+  const controllerOwned = daemonStatus?.ownership === "controller";
+  const daemonVersionMismatch = !controllerOwned && isVersionMismatch(appVersion, daemonVersion);
   const daemonStatusStateText =
     statusError ??
+    daemonStatus?.error ??
     (daemonStatus?.status === "running"
       ? t("desktop.daemon.status.running")
       : t("desktop.daemon.status.notRunning"));
@@ -445,6 +489,7 @@ export function LocalDaemonSection() {
             daemonStatusStateText={daemonStatusStateText}
             daemonStatusDetailText={daemonStatusDetailText}
             isDaemonManagementPaused={isDaemonManagementPaused}
+            controllerOwned={controllerOwned}
             copyIcon={copyIcon}
             fileTextIcon={fileTextIcon}
             activityIcon={activityIcon}
@@ -460,25 +505,7 @@ export function LocalDaemonSection() {
             isLoadingCliStatus={isLoadingCliStatus}
           />
 
-          {daemonStatus?.pid ? (
-            <View style={settingsStyles.card}>
-              <View style={settingsStyles.row}>
-                <View style={settingsStyles.rowContent}>
-                  <Text style={settingsStyles.rowTitle}>
-                    {daemonStatus.ownedByDesktop
-                      ? t("desktop.daemon.lifecycle.owned")
-                      : t("desktop.daemon.lifecycle.attached")}
-                  </Text>
-                  <Text style={settingsStyles.rowHint}>{daemonStatus.home}</Text>
-                </View>
-                <Button variant="outline" size="sm" onPress={handleStop} disabled={isStopping}>
-                  {isStopping
-                    ? t("desktop.daemon.lifecycle.stopping")
-                    : t("desktop.daemon.lifecycle.stop")}
-                </Button>
-              </View>
-            </View>
-          ) : null}
+          <DaemonOwnershipCard status={daemonStatus} isStopping={isStopping} onStop={handleStop} />
 
           {daemonVersionMismatch ? (
             <View style={styles.warningCard}>

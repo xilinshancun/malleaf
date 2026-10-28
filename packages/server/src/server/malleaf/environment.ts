@@ -9,6 +9,7 @@ import { assertMalleafHomeIsolated, resolveMalleafHome, canonicalMalleafPath } f
 import { DAEMON_SETTING_ENV_KEYS } from "../config-environment.js";
 
 export { assertMalleafHomeIsolated };
+export { resolveDesktopDaemonSelection, type DesktopDaemonSelection } from "./desktop-selection.js";
 
 // RFC-0001: Public entry points discard the hosting Paseo environment. Only
 // explicitly namespaced Malleaf options are translated for upstream internals.

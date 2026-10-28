@@ -50,6 +50,7 @@ test.each([
   });
   const files = Object.keys(result.metafile.inputs);
   expect(files.length).toBeGreaterThan(1);
+  expect(files.filter((file) => /packages\/protocol\/dist\/malleaf\//.test(file))).toEqual([]);
   expect(
     files.filter((file) =>
       /packages\/server\/.*\/(?:bootstrap|agent-manager|session|messages)\.[jt]s$/.test(file),
