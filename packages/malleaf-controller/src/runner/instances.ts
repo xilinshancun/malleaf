@@ -14,6 +14,10 @@ const launchSchema = z.looseObject({
   token: z.string().uuid(),
   at: z.string().datetime(),
   bootDrainId: z.string().uuid().optional(),
+  controllerToken: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 const instanceSchema = z.looseObject({
   pid: z.number().int().positive(),
@@ -33,7 +37,19 @@ interface LedgerOptions {
   home: string;
   assertOwned(): void;
 }
-type LaunchIntent = Pick<InstanceRegistration, "home" | "buildId" | "token" | "bootDrainId">;
+type LaunchIntent = Pick<
+  InstanceRegistration,
+  "home" | "buildId" | "token" | "bootDrainId" | "controllerToken"
+>;
+
+export function requireControllerToken(registration: InstanceRegistration): string {
+  if (!registration.controllerToken)
+    throw new StorageError(
+      "state_conflict",
+      "Registered runtime has no controller authority; inspect before recovery",
+    );
+  return registration.controllerToken;
+}
 
 export function matchesRegisteredInstance(
   registration: InstanceRegistration,
@@ -52,6 +68,7 @@ export async function openInstanceLedger(options: LedgerOptions) {
     ...options,
     name: "instances.json",
     schema: ledgerSchema,
+    supportedVersion: 2,
     initial: { ...initialDocument(), registrations: {} },
   });
   return {
@@ -72,7 +89,17 @@ export async function openInstanceLedger(options: LedgerOptions) {
             "state_conflict",
             `An uncleared ${role} launch is already registered`,
           );
-        return { ...state, registrations: { ...state.registrations, [role]: registration } };
+        return {
+          ...state,
+          ...(registration.controllerToken
+            ? {
+                schemaVersion: Math.max(state.schemaVersion, 2),
+                minReaderVersion: Math.max(state.minReaderVersion, 2),
+                minWriterVersion: Math.max(state.minWriterVersion, 2),
+              }
+            : {}),
+          registrations: { ...state.registrations, [role]: registration },
+        };
       });
     },
     acquired(role: InstanceRole, token: string, instance: DaemonInstance) {

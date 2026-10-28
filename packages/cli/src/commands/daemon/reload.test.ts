@@ -1,3 +1,12 @@
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Command } from "commander";
+import type { CommandOptions } from "../../output/index.js";
+import { runStopCommand } from "./stop.js";
+import { runRestartCommand } from "./restart.js";
+import { runDaemonReloadCommand } from "./reload.js";
+import { launchLocalDaemon } from "./local-daemon.js";
 import { describe, expect, test } from "vitest";
 import { render } from "../../output/render.js";
 import { daemonReloadSchema, type DaemonReloadResult } from "./reload.js";
@@ -59,4 +68,25 @@ describe("daemon reload output", () => {
       "appliedPaths:\n  - daemon.browserTools.enabled",
     );
   });
+});
+
+test("managed homes reject local launch, stop, restart and reload before any process action", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "malleaf-cli-authority-"));
+  try {
+    await mkdir(path.join(home, "runtime"));
+    await writeFile(
+      path.join(home, "runtime/controller-authority.json"),
+      JSON.stringify({ schemaVersion: 1, tokenHash: "a".repeat(64) }),
+    );
+    const options = { daemonTarget: { kind: "instance", home } } as CommandOptions;
+    for (const run of [runStopCommand, runRestartCommand, runDaemonReloadCommand])
+      await expect(run(options, new Command())).rejects.toThrow("controller_owned");
+    await expect(launchLocalDaemon({ home })).rejects.toThrow("controller_owned");
+    await writeFile(path.join(home, "runtime/controller-authority.json"), "{");
+    await expect(runStopCommand(options, new Command())).rejects.toThrow(
+      "Invalid controller authority marker",
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

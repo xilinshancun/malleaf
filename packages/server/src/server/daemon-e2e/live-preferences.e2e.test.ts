@@ -1,9 +1,10 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import type { AgentSnapshotPayload, SessionOutboundMessage } from "../messages.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
@@ -142,6 +143,69 @@ test("Malleaf boot admission stays closed until selected and remains released af
     rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+test("Malleaf controller authority protects real lifecycle RPCs and permits shutdown after commit", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "malleaf-authority-wire-"));
+  const token = randomBytes(32).toString("hex");
+  const home = path.join(root, ".paseo");
+  await mkdir(path.join(home, "runtime"), { recursive: true });
+  await writeFile(
+    path.join(home, "runtime/controller-authority.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+    }),
+  );
+  const daemon = await createTestPaseoDaemon({ paseoHomeRoot: root, mcpEnabled: false });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    capabilities: { owned_subscriptions: true },
+    reconnect: { enabled: false },
+  });
+  try {
+    await client.connect();
+    expect(client.supportsMalleafControllerAuthority()).toBe(true);
+    const drainId = randomUUID();
+    for (const controllerToken of [undefined, randomBytes(32).toString("hex")]) {
+      for (const action of ["begin", "end", "commit"] as const) {
+        await expect(
+          client.quiesceDaemon({ action, drainId, deadlineMs: 1000, controllerToken }),
+        ).rejects.toThrow("controller_owned");
+      }
+      await expect(client.shutdownServer({ timeout: 1000, controllerToken })).rejects.toThrow(
+        "controller_owned",
+      );
+    }
+    await expect(client.restartServer()).rejects.toThrow("controller_owned");
+    await expect(client.reloadDaemonConfig()).rejects.toThrow("controller_owned");
+    await expect(client.patchDaemonConfig({ relay: { enabled: true } })).rejects.toThrow(
+      "controller_owned",
+    );
+    await client.quiesceDaemon({
+      action: "begin",
+      drainId,
+      deadlineMs: 10_000,
+      controllerToken: token,
+    });
+    expect(await client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).toMatchObject({
+      state: "draining",
+      drainId: null,
+      expiresAt: null,
+    });
+    expect(
+      await client.quiesceDaemon({ action: "status", deadlineMs: 1000, controllerToken: token }),
+    ).toMatchObject({ state: "draining", drainId });
+    await client.quiesceDaemon({ action: "commit", drainId, controllerToken: token });
+    await expect(client.shutdownServer({ timeout: 1000 })).rejects.toThrow("controller_owned");
+    await expect(
+      client.shutdownServer({ timeout: 1000, controllerToken: token }),
+    ).resolves.toMatchObject({ status: "shutdown_requested" });
+  } finally {
+    await client.close();
+    await daemon.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 20_000);
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));

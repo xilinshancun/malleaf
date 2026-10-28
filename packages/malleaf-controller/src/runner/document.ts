@@ -29,6 +29,7 @@ interface DocumentOptions<T extends DocumentHeader> {
   name: "switch.json" | "instances.json";
   schema: z.ZodType<T>;
   initial: T;
+  supportedVersion?: number;
   assertOwned(): void;
 }
 
@@ -70,7 +71,7 @@ export async function openOwnedDocument<T extends DocumentHeader>(options: Docum
     try {
       const header = documentSchema.parse(value);
       if (
-        header.minReaderVersion > 1 ||
+        header.minReaderVersion > (options.supportedVersion ?? 1) ||
         header.minReaderVersion > header.schemaVersion ||
         header.minWriterVersion > header.schemaVersion
       )
@@ -140,7 +141,7 @@ export async function openOwnedDocument<T extends DocumentHeader>(options: Docum
     update(mutate: (current: T) => T | Promise<T>) {
       return enqueue(async () => {
         const current = await reread();
-        if (current.minWriterVersion > 1)
+        if (current.minWriterVersion > (options.supportedVersion ?? 1))
           throw new StorageError(
             "unsupported_schema",
             `Runner state requires a newer writer: ${filename}`,

@@ -1,3 +1,4 @@
+import { loadControllerAuthority } from "../src/server/malleaf/controller-authority.js";
 import { fileURLToPath } from "url";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -105,6 +106,11 @@ async function main(): Promise<void> {
       : null;
 
   const paseoHome = resolvePaseoHome(workerEnv);
+  const authority = await loadControllerAuthority(
+    paseoHome,
+    workerEnv.MALLEAF_CONTROLLER_AUTHORITY_HASH,
+  );
+  if (authority) workerEnv.MALLEAF_CONTROLLER_AUTHORITY_HASH = authority.tokenHash;
   const persistedConfig = loadPersistedConfig(paseoHome);
   const supervisorLogFile = resolveSupervisorLogFile(paseoHome, persistedConfig, workerEnv);
 

@@ -1902,6 +1902,7 @@ export const RestartServerRequestMessageSchema = z.object({
 
 export const ShutdownServerRequestMessageSchema = z.object({
   type: z.literal("shutdown_server_request"),
+  controllerToken: z.string().optional(),
   requestId: z.string(),
 });
 
@@ -3658,6 +3659,8 @@ export const ServerInfoStatusPayloadSchema = z
         malleafQuiesceCommit: z.boolean().optional(),
         // COMPAT(malleafBootDrain): added in Malleaf 0.1.0; keep optional for older personal slots.
         malleafBootDrain: z.boolean().optional(),
+        // COMPAT(malleafControllerAuthority): added in v0.1.0, review after 2027-04-28.
+        malleafControllerAuthority: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.
         agentRequestReceipts: z.boolean().optional(),
         // COMPAT(workspaceRequestReceipts): added in v0.8.0; remove gate after 2027-03-07.

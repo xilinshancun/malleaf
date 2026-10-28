@@ -2,7 +2,7 @@
 // A supplied physical slot is exercised only in a new disposable OS/product home.
 // This is process acceptance, not activation of the installed personal runtime.
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -60,6 +60,7 @@ try {
     daemonHome: prepared.daemonHome,
     environment: prepared.env,
     clientId: randomUUID(),
+    controllerToken: randomBytes(32).toString("hex"),
     assertOwned: lease.assertOwned,
     timeoutMs: 60_000,
   });
@@ -72,12 +73,12 @@ try {
   );
   assert.equal(info.version, packageInfo.version);
   const mockDrain = mockProvider
-    ? await exerciseMockDrain(runtime.client, prepared.root)
+    ? await exerciseMockDrain(runtime.client, prepared.root, runtime.quiesce)
     : undefined;
-  const initial = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+  const initial = await runtime.quiesce({ action: "status", deadlineMs: 1000 });
   assert.equal(initial.state, "accepting");
   const drainId = randomUUID();
-  const draining = await runtime.client.quiesceDaemon({
+  const draining = await runtime.quiesce({
     action: "begin",
     drainId,
     deadlineMs: 10_000,
@@ -92,16 +93,13 @@ try {
     assert.equal(draining[name], 0);
   assert.deepEqual(draining.running, []);
   assert.deepEqual(draining.pendingPermissions, []);
-  assert.equal(
-    (await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).drainId,
-    drainId,
-  );
+  assert.equal((await runtime.quiesce({ action: "status", deadlineMs: 1000 })).drainId, drainId);
   await assert.rejects(
-    runtime.client.quiesceDaemon({ action: "end", drainId: randomUUID(), deadlineMs: 1000 }),
+    runtime.quiesce({ action: "end", drainId: randomUUID(), deadlineMs: 1000 }),
     /drain_not_owned/,
   );
   assert.equal(
-    (await runtime.client.quiesceDaemon({ action: "end", drainId, deadlineMs: 1000 })).state,
+    (await runtime.quiesce({ action: "end", drainId, deadlineMs: 1000 })).state,
     "accepting",
   );
   await runtime.stop();
@@ -118,6 +116,7 @@ try {
       daemonHome: prepared.daemonHome,
       environment: prepared.env,
       clientId: randomUUID(),
+      controllerToken: randomBytes(32).toString("hex"),
       assertOwned: lease.assertOwned,
       signal: abort.signal,
       recordInstance: async (acquired) => {

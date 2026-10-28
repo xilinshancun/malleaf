@@ -268,7 +268,7 @@ async function main() {
           runtimeIdentity: current.runtime?.info.malleaf ?? null,
           ...(await acceptanceStatus(
             () =>
-              current.runtime?.client.quiesceDaemon({ action: "status", deadlineMs: 1000 }) ??
+              current.runtime?.quiesce({ action: "status", deadlineMs: 1000 }) ??
               Promise.resolve(null),
           )),
           paused: current.paused ?? false,

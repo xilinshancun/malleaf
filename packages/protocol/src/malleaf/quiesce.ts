@@ -22,6 +22,7 @@ export const DaemonQuiesceRequestSchema = z.object({
   requestId: z.string(),
   action: z.enum(["begin", "end", "status", "commit"]),
   drainId: MalleafDrainIdSchema.optional(),
+  controllerToken: z.string().optional(),
   deadlineMs: z.number().int().min(1000).max(900_000).optional(),
 });
 export type DaemonQuiesceRequest = z.infer<typeof DaemonQuiesceRequestSchema>;

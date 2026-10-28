@@ -9,11 +9,11 @@ const counters = [
   "pendingScheduleRuns",
 ];
 
-async function waitForStatus(client, predicate, timeoutMs = 20_000) {
+async function waitForStatus(quiesce, predicate, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let status;
   do {
-    status = await client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+    status = await quiesce({ action: "status", deadlineMs: 1000 });
     if (predicate(status)) return status;
     await delay(25);
   } while (Date.now() < deadline);
@@ -21,7 +21,11 @@ async function waitForStatus(client, predicate, timeoutMs = 20_000) {
 }
 
 // Uses the actual copied daemon's mock provider, never an installed harness.
-export async function exerciseMockDrain(client, cwd) {
+export async function exerciseMockDrain(
+  client,
+  cwd,
+  quiesce = (request) => client.quiesceDaemon(request),
+) {
   const agent = await client.createAgent({ provider: "mock", model: "ten-second-stream", cwd });
   const idle = await client.createAgent({ provider: "mock", model: "ten-second-stream", cwd });
   const empty = (status) =>
@@ -29,9 +33,9 @@ export async function exerciseMockDrain(client, cwd) {
     status.pendingPermissions.length === 0 &&
     counters.every((key) => status[key] === 0);
   await client.sendMessage(agent.id, "Complete this accepted mock turn during the drain.");
-  await waitForStatus(client, (status) => status.running.includes(agent.id));
+  await waitForStatus(quiesce, (status) => status.running.includes(agent.id));
   const drainId = randomUUID();
-  const active = await client.quiesceDaemon({ action: "begin", drainId, deadlineMs: 30_000 });
+  const active = await quiesce({ action: "begin", drainId, deadlineMs: 30_000 });
   const activeAt = new Date().toISOString();
   assert.equal(active.state, "draining");
   assert.ok(active.running.includes(agent.id));
@@ -40,16 +44,16 @@ export async function exerciseMockDrain(client, cwd) {
   const finished = await client.waitForFinish(agent.id, 20_000);
   assert.equal(finished.status, "idle");
   assert.equal(finished.error, null);
-  const drained = await waitForStatus(client, empty);
+  const drained = await waitForStatus(quiesce, empty);
   const drainedAt = new Date().toISOString();
   assert.equal(drained.state, "draining");
   assert.equal(drained.drainId, drainId);
-  await client.quiesceDaemon({ action: "end", drainId, deadlineMs: 1000 });
+  await quiesce({ action: "end", drainId, deadlineMs: 1000 });
 
   await client.sendMessage(agent.id, "This accepted turn will be cancelled during drain.");
-  await waitForStatus(client, (status) => status.running.includes(agent.id));
+  await waitForStatus(quiesce, (status) => status.running.includes(agent.id));
   const cancelDrainId = randomUUID();
-  const cancelActive = await client.quiesceDaemon({
+  const cancelActive = await quiesce({
     action: "begin",
     drainId: cancelDrainId,
     deadlineMs: 30_000,
@@ -57,14 +61,11 @@ export async function exerciseMockDrain(client, cwd) {
   assert.ok(cancelActive.running.includes(agent.id));
   const cancelActiveAt = new Date().toISOString();
   await client.cancelAgent(agent.id);
-  const cancelled = await waitForStatus(client, empty);
+  const cancelled = await waitForStatus(quiesce, empty);
   const cancelledAt = new Date().toISOString();
   assert.equal(cancelled.state, "draining");
-  await client.quiesceDaemon({ action: "end", drainId: cancelDrainId, deadlineMs: 1000 });
-  assert.equal(
-    (await client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).state,
-    "accepting",
-  );
+  await quiesce({ action: "end", drainId: cancelDrainId, deadlineMs: 1000 });
+  assert.equal((await quiesce({ action: "status", deadlineMs: 1000 })).state, "accepting");
   return {
     agentId: agent.id,
     active,

@@ -1,3 +1,4 @@
+import { assertUnmanagedDaemonTarget } from "./local-daemon.js";
 import { Command } from "commander";
 import {
   readDaemonInstance,
@@ -25,6 +26,7 @@ export function daemonRestartCommand(): Command {
 
 export async function runRestartCommand(options: CommandOptions, _command: Command) {
   const target = options.daemonTarget;
+  await assertUnmanagedDaemonTarget(target);
   const deadline = Date.now() + parseTimeoutMs(options.timeout);
   const remaining = () => Math.max(1, deadline - Date.now());
   const instance = target.kind === "instance" ? await readDaemonInstance(target.home) : null;

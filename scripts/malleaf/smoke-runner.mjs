@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceJson } from "./smoke-audit.mjs";
 // Stable-entry acceptance only in a new disposable mock home.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -240,6 +241,7 @@ try {
       assert.ok(registration.instance, "Unresolved intent is retained for diagnosis");
       await stopRuntimeInstance({
         daemonHome: registration.home,
+        controllerToken: registration.controllerToken,
         instance: registration.instance,
         assertOwned: owner.assertOwned,
         clientId: randomUUID(),
@@ -247,7 +249,10 @@ try {
       assert.equal(await readDaemonInstance(registration.home), null);
       await ledger.clear(role, registration.token);
     }
-    await writeFile(path.join(evidenceRoot, "instances.json"), await readFile(ledgerFile));
+    await writeFile(
+      path.join(evidenceRoot, "instances.json"),
+      evidenceJson(JSON.parse(await readFile(ledgerFile, "utf8"))),
+    );
   } finally {
     await owner.release({ seal: ledger.seal });
   }
@@ -291,7 +296,7 @@ const result = {
   causes: failure instanceof AggregateError ? failure.errors.map(String) : [],
 };
 if (failure) {
-  await writeFile(path.join(evidenceRoot, "failure.json"), JSON.stringify(result, null, 2));
+  await writeFile(path.join(evidenceRoot, "failure.json"), evidenceJson(result, null, 2));
   throw failure;
 }
 async function makeRemovable(directory) {
@@ -310,5 +315,5 @@ Object.assign(result, {
   slotUnchanged: true,
   disposed: true,
 });
-await writeFile(path.join(evidenceRoot, "result.json"), JSON.stringify(result, null, 2));
-process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+await writeFile(path.join(evidenceRoot, "result.json"), evidenceJson(result, null, 2));
+process.stdout.write(`${evidenceJson(result, null, 2)}\n`);

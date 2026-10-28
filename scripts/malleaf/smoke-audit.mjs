@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { cp, lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -86,4 +86,36 @@ export async function assertNoSlotProcesses(root) {
   });
   assert.deepEqual(remaining, [], "A process still references the acceptance root");
   return remaining;
+}
+
+export function evidenceJson(value, _replacer = null, space = 2) {
+  return JSON.stringify(
+    value,
+    (key, item) => (key === "controllerToken" ? "[REDACTED]" : item),
+    space,
+  );
+}
+
+export async function copyRunnerEvidence(home, destination) {
+  await cp(path.join(home, "runner"), destination, {
+    recursive: true,
+    filter: (source) => !path.basename(source).replace(/^\./, "").startsWith("instances.json"),
+  });
+  const ledger = JSON.parse(await readFile(path.join(home, "runner/instances.json"), "utf8"));
+  await writeFile(path.join(destination, "instances.json"), evidenceJson(ledger), { mode: 0o600 });
+}
+
+export async function assertNoControllerTokens(directory, tokens) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const filename = path.join(directory, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink())
+      await assertNoControllerTokens(filename, tokens);
+    else if (entry.isFile()) {
+      const contents = await readFile(filename, "utf8");
+      assert.ok(
+        tokens.every((token) => !contents.includes(token)),
+        `Controller token leaked into evidence: ${filename}`,
+      );
+    }
+  }
 }

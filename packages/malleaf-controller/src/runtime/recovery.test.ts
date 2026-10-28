@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { publishRuntimeAuthority } from "./authority.js";
+import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -38,6 +39,7 @@ function fixture() {
       home: epochHome(home, pair),
       buildId: pair.buildId,
       token: randomUUID(),
+      controllerToken: randomBytes(32).toString("hex"),
       at: new Date().toISOString(),
       instance: {
         pid,
@@ -197,6 +199,7 @@ test("recovery resolves a home alias before matching a registered live instance"
         listen: null,
       },
     };
+    await publishRuntimeAuthority(daemonHome, registration.controllerToken!, () => {});
     // Observation only: no server is started and no signal is sent to this test process.
     await writeFile(path.join(daemonHome, "paseo.pid"), JSON.stringify(registration.instance));
     f.ledger.registrations.baseline = registration;
@@ -205,4 +208,14 @@ test("recovery resolves a home alias before matching a registered live instance"
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("a legacy registration without controller authority cannot authorize recovery actions", () => {
+  const f = fixture();
+  const registered = f.registration();
+  delete registered.controllerToken;
+  f.ledger.registrations.candidate = registered;
+  expect(() => classifyRecovery({ ...f, live: [f.observed(registered)] })).toThrow(
+    "no controller authority",
+  );
 });

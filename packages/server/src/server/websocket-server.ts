@@ -1943,7 +1943,12 @@ export class VoiceAssistantWebSocketServer {
       hostname: getHostName(),
       version: this.daemonVersion,
       ...(this.daemonRuntimeConfig?.malleafIdentity
-        ? { malleaf: this.daemonRuntimeConfig.malleafIdentity }
+        ? {
+            malleaf: {
+              ...this.daemonRuntimeConfig.malleafIdentity,
+              ...(this.daemonRuntimeConfig.controllerAuthority ? { controllerOwned: true } : {}),
+            },
+          }
         : {}),
       sourceId: session.getHostSourceId(),
       permissions: session.getPermissions(),
@@ -1951,6 +1956,7 @@ export class VoiceAssistantWebSocketServer {
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
+        malleafControllerAuthority: true,
         ...(this.daemonRuntimeConfig?.quiesce
           ? { malleaf: true, malleafQuiesceCommit: true, malleafBootDrain: true }
           : {}),

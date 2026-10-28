@@ -3,6 +3,7 @@
 export function isolateRuntimeNodeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     ...environment,
+    MALLEAF_CONTROLLER_TOKEN: undefined,
     MALLEAF_HOST_NODE_OPTIONS: environment.NODE_OPTIONS ?? "",
     MALLEAF_HOST_NODE_PATH: environment.NODE_PATH ?? "",
     NODE_OPTIONS: "--no-global-search-paths",

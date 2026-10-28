@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { requireControllerToken } from "../runner/instances.js";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, realpath, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -121,6 +122,7 @@ export async function createIsolatedActivation(options: {
       clientId,
       assertOwned,
       instance: registration.instance,
+      controllerToken: requireControllerToken(registration),
     });
     await ledger.clear(role, registration.token);
     if (running?.role === role) {
@@ -162,10 +164,18 @@ export async function createIsolatedActivation(options: {
     await assertAcceptanceEpoch(daemonHome);
     await clearStopped(role);
     const token = randomUUID();
-    await ledger.intent(role, { home: daemonHome, buildId: pair.buildId, token, bootDrainId });
+    const controllerToken = randomBytes(32).toString("hex");
+    await ledger.intent(role, {
+      home: daemonHome,
+      buildId: pair.buildId,
+      token,
+      bootDrainId,
+      controllerToken,
+    });
     try {
       const handle = await launchRuntime({
         ...target(pair, daemonHome),
+        controllerToken,
         environment: {
           ...environment,
           MALLEAF_HOME: home,
@@ -245,7 +255,7 @@ export async function createIsolatedActivation(options: {
           throw new StorageError("unsupported_schema", "Candidate lacks atomic drain commit");
         if (!handle.client.supportsMalleafBootDrain())
           throw new StorageError("unsupported_schema", "Candidate lacks boot admission gating");
-        const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+        const status = await handle.quiesce({ action: "status", deadlineMs: 1000 });
         if (status.state !== "accepting")
           throw new StorageError("state_conflict", "Preflight is not accepting work");
       } finally {
@@ -301,9 +311,13 @@ export async function createIsolatedActivation(options: {
     const expected = plan.attach.instance;
     if (!expected) throw new StorageError("state_conflict", "Recovery cannot attach an intent");
     await assertAcceptanceEpoch(plan.attach.home);
-    const handle = await attachRuntime({ ...target(plan.target), expected });
+    const handle = await attachRuntime({
+      ...target(plan.target),
+      expected,
+      controllerToken: requireControllerToken(plan.attach),
+    });
     running = { pair: plan.target, role: await roleOf(plan.attach), handle };
-    const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+    const status = await handle.quiesce({ action: "status", deadlineMs: 1000 });
     if (status.state === "shutdown") {
       if (attachOnly)
         throw new StorageError("state_conflict", "Handoff cannot restart a frozen daemon");
@@ -323,7 +337,7 @@ export async function createIsolatedActivation(options: {
       )
         throw new StorageError("state_conflict", "Another owner controls the runtime drain");
       assertOwned();
-      await handle.client.quiesceDaemon({
+      await handle.quiesce({
         action: "end",
         drainId,
         deadlineMs: 1000,
@@ -449,7 +463,7 @@ export async function createIsolatedActivation(options: {
       );
       running = { pair: transaction.candidate, role: "candidate", handle };
       await journal.advance(request.switchId, "probing");
-      const status = await handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+      const status = await handle.quiesce({ action: "status", deadlineMs: 1000 });
       if (
         !handle.client.supportsMalleafBootDrain() ||
         status.state !== "draining" ||
@@ -464,7 +478,7 @@ export async function createIsolatedActivation(options: {
         pointer.beginTrial({ pair: transaction.candidate, ...decision(transaction) }),
       );
       assertOwned();
-      await handle.client.quiesceDaemon({ action: "end", drainId: bootDrainId });
+      await handle.quiesce({ action: "end", drainId: bootDrainId });
     } catch (error) {
       if (!(await recoverFailedActivation(transaction, error))) throw error;
     }
@@ -507,8 +521,7 @@ export async function createIsolatedActivation(options: {
     if (
       !live ||
       !isSameDaemonInstance(live, current.handle.instance) ||
-      (await current.handle.client.quiesceDaemon({ action: "status", deadlineMs: 1000 })).state !==
-        "accepting"
+      (await current.handle.quiesce({ action: "status", deadlineMs: 1000 })).state !== "accepting"
     )
       throw new StorageError("state_conflict", "Candidate is not a live accepting trial");
     await journal.advance(switchId, "committing");
@@ -522,7 +535,7 @@ export async function createIsolatedActivation(options: {
   }
   async function commitTrialStop(transaction: SwitchTransaction) {
     const current = requireRunning(transaction.candidate);
-    const status = await current.handle.client.quiesceDaemon({
+    const status = await current.handle.quiesce({
       action: "status",
       deadlineMs: 1000,
     });
@@ -534,7 +547,7 @@ export async function createIsolatedActivation(options: {
       assertOwned();
       // Revert must not require opening an unpublished-work gate, including when
       // its durable release previously failed. Commit checks the barriers itself.
-      await current.handle.client.quiesceDaemon({
+      await current.handle.quiesce({
         action: "commit",
         drainId: registration.bootDrainId,
         deadlineMs: 1000,

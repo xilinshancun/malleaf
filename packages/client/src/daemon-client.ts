@@ -785,6 +785,7 @@ type AgentRefreshedStatusPayload = z.infer<typeof AgentRefreshedStatusPayloadSch
 type RestartRequestedStatusPayload = z.infer<typeof RestartRequestedStatusPayloadSchema>;
 type ShutdownRequestedStatusPayload = z.infer<typeof ShutdownRequestedStatusPayloadSchema>;
 export interface ShutdownServerOptions {
+  controllerToken?: string;
   requestId?: string;
   timeout?: number;
 }
@@ -4107,10 +4108,13 @@ export class DaemonClient {
   }
 
   async shutdownServer(options?: ShutdownServerOptions): Promise<ShutdownRequestedStatusPayload> {
+    if (options?.controllerToken !== undefined && !this.supportsMalleafControllerAuthority())
+      throw new Error("Update the host to support Malleaf controller authority.");
     const resolvedRequestId = this.createRequestId(options?.requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "shutdown_server_request",
       requestId: resolvedRequestId,
+      controllerToken: options?.controllerToken,
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -4165,6 +4169,10 @@ export class DaemonClient {
     return this.lastServerInfoMessage?.features?.malleafBootDrain === true;
   }
 
+  supportsMalleafControllerAuthority(): boolean {
+    return this.getLastServerInfoMessage()?.features?.malleafControllerAuthority === true;
+  }
+
   supportsMalleafQuiesceCommit(): boolean {
     return this.lastServerInfoMessage?.features?.malleafQuiesceCommit === true;
   }
@@ -4174,6 +4182,8 @@ export class DaemonClient {
   ): Promise<MalleafQuiesceStatus> {
     if (!this.supportsMalleaf())
       throw new Error("Update the host to a Malleaf version supporting runtime switching.");
+    if (input.controllerToken !== undefined && !this.supportsMalleafControllerAuthority())
+      throw new Error("Update the host to support Malleaf controller authority.");
     if (input.action === "commit" && !this.supportsMalleafQuiesceCommit())
       throw new Error("Update the host to support atomic Malleaf drain commit.");
     const requestId = this.createRequestId();

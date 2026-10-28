@@ -1,3 +1,4 @@
+import { verifyRuntimeAuthority } from "./authority.js";
 import path from "node:path";
 import { realpath } from "node:fs/promises";
 import { readDaemonInstance, type DaemonInstance } from "@getpaseo/server/daemon-control";
@@ -6,6 +7,7 @@ import { StorageError } from "../storage.js";
 import { samePair, type SwitchTransaction } from "../runner/journal.js";
 import {
   matchesRegisteredInstance,
+  requireControllerToken,
   type InstanceLedgerState,
   type InstanceRegistration,
 } from "../runner/instances.js";
@@ -52,7 +54,12 @@ export async function inspectRecovery(state: RecoveryState): Promise<RecoveryPla
     const instance = await readDaemonInstance(home);
     if (instance) live.push({ home, instance });
   }
-  return classifyRecovery({ ...state, live });
+  const plan = classifyRecovery({ ...state, live });
+  for (const registration of Object.values(state.ledger.registrations)) {
+    if (registration?.instance)
+      await verifyRuntimeAuthority(registration.home, requireControllerToken(registration));
+  }
+  return plan;
 }
 
 // Inventory and validate every instance before returning any permitted process
@@ -67,6 +74,8 @@ function validateInventory(state: RecoveryState & { live: ObservedRuntime[] }) {
         `Unresolved ${role} launch intent at ${registration.home}; inspect before recovery`,
       );
   }
+  for (const [, registration] of registrations)
+    if (registration?.instance) requireControllerToken(registration);
   const stop: InstanceRegistration[] = [];
   const production: InstanceRegistration[] = [];
   const productionHomes = new Set(

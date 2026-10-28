@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceJson, copyRunnerEvidence, assertNoControllerTokens } from "./smoke-audit.mjs";
 // Journalled activation acceptance in a new mock-only temporary product home.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -125,8 +126,16 @@ const knownByHome = new Map();
 const bootSnapshots = [];
 const originalIntent = ledger.intent;
 ledger.intent = async (role, input) => {
+  if (role === "candidate")
+    await assert.rejects(readFile(path.join(input.home, "runtime/controller-authority.json")), {
+      code: "ENOENT",
+    });
   const result = await originalIntent(role, input);
-  launches.set(input.token, { role, ...input });
+  launches.set(input.token, {
+    role,
+    ...input,
+    authorityMarkerAbsentBeforeLaunch: role === "candidate",
+  });
   return result;
 };
 const originalAcquired = ledger.acquired;
@@ -147,12 +156,13 @@ ledger.acquired = async (role, token, instance) => {
       slotDirectory: path.join(versionsRoot, intent.buildId),
       buildId: intent.buildId,
       daemonHome: intent.home,
+      controllerToken: intent.controllerToken,
       expected: instance,
       clientId: randomUUID(),
       assertOwned: lease.assertOwned,
     });
     try {
-      const status = await observer.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+      const status = await observer.quiesce({ action: "status", deadlineMs: 1000 });
       await assert.rejects(readFile(path.join(intent.home, "runtime/boot-drain-released.json")), {
         code: "ENOENT",
       });
@@ -207,7 +217,7 @@ async function record(label, result) {
     instance: result.runtime?.instance,
     identity: result.runtime?.info.malleaf,
     status: result.runtime
-      ? await result.runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 })
+      ? await result.runtime.quiesce({ action: "status", deadlineMs: 1000 })
       : null,
   };
   const acquiredEntry = result.runtime && acquired.get(result.runtime.instance.pid);
@@ -218,7 +228,7 @@ async function record(label, result) {
     assert.equal(snapshot.bootRelease.drainId, acquiredEntry.bootDrainId);
   }
   stages.push(snapshot);
-  await writeFile(path.join(evidenceRoot, "stages.json"), JSON.stringify(stages, null, 2));
+  await writeFile(path.join(evidenceRoot, "stages.json"), evidenceJson(stages, null, 2));
   process.stderr.write(`${label}: ${result.transaction?.step ?? "current"}\n`);
   return result;
 }
@@ -240,10 +250,8 @@ async function reopen() {
   return controller.recover();
 }
 async function capture() {
-  await writeFile(path.join(evidenceRoot, "manifests.json"), JSON.stringify(manifests, null, 2));
-  await cp(path.join(prepared.home, "runner"), path.join(evidenceRoot, "runner"), {
-    recursive: true,
-  });
+  await writeFile(path.join(evidenceRoot, "manifests.json"), evidenceJson(manifests, null, 2));
+  await copyRunnerEvidence(prepared.home, path.join(evidenceRoot, "runner"));
   for (const name of await readdir(path.join(prepared.home, "data"))) {
     const home = path.join(prepared.home, "data", name);
     if (!(await lstat(home)).isDirectory()) continue;
@@ -259,10 +267,34 @@ async function capture() {
     });
   }
 }
+async function assertAuthority(runtime) {
+  assert.equal(runtime.info.malleaf.controllerOwned, true);
+  assert.equal(runtime.client.supportsMalleafControllerAuthority(), true);
+  const drainId = randomUUID();
+  for (const action of ["begin", "end", "commit"]) {
+    await assert.rejects(
+      runtime.client.quiesceDaemon({ action, drainId, deadlineMs: 1000 }),
+      /controller_owned/,
+    );
+  }
+  await assert.rejects(runtime.client.shutdownServer({ timeout: 1000 }), /controller_owned/);
+  await assert.rejects(runtime.client.restartServer(), /controller_owned/);
+  await assert.rejects(
+    runtime.client.patchDaemonConfig({ relay: { enabled: true } }),
+    /controller_owned/,
+  );
+  await runtime.quiesce({ action: "begin", drainId, deadlineMs: 10_000 });
+  const publicStatus = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+  assert.equal(publicStatus.drainId, null);
+  assert.equal(publicStatus.expiresAt, null);
+  assert.equal((await runtime.quiesce({ action: "status", deadlineMs: 1000 })).drainId, drainId);
+  await runtime.quiesce({ action: "end", drainId });
+}
 let completed = false;
 let failure;
 try {
   await record("baseline", await controller.recover());
+  await assertAuthority(current.runtime);
   const agent = await current.runtime.client.createAgent({
     provider: "mock",
     model: "ten-second-stream",
@@ -271,7 +303,7 @@ try {
   await current.runtime.client.sendMessage(agent.id, "Finish this accepted turn before switching.");
   const turnDeadline = Date.now() + 20_000;
   for (;;) {
-    const status = await current.runtime.client.quiesceDaemon({
+    const status = await current.runtime.quiesce({
       action: "status",
       deadlineMs: 1000,
     });
@@ -347,12 +379,12 @@ try {
   await journal.begin({ ...interrupted, baseline: current.pointer.current }, current.pointer);
   for (const step of ["preflight", "preflight_ok", "draining"])
     await journal.advance(interrupted.switchId, step);
-  await current.runtime.client.quiesceDaemon({
+  await current.runtime.quiesce({
     action: "begin",
     drainId: interrupted.drainId,
     deadlineMs: 10_000,
   });
-  await current.runtime.client.quiesceDaemon({ action: "commit", drainId: interrupted.drainId });
+  await current.runtime.quiesce({ action: "commit", drainId: interrupted.drainId });
   const frozenPid = current.runtime.instance.pid;
   await record("recovered-after-stop-commit", await reopen());
   assert.equal(current.transaction.step, "aborted");
@@ -388,6 +420,7 @@ async function cleanup() {
     try {
       await stopRuntimeInstance({
         daemonHome: registration.home,
+        controllerToken: registration.controllerToken,
         clientId: randomUUID(),
         instance: registration.instance,
         assertOwned: lease.assertOwned,
@@ -439,7 +472,7 @@ try {
 if (failure) {
   await writeFile(
     path.join(evidenceRoot, "failure.json"),
-    JSON.stringify(
+    evidenceJson(
       {
         sourceCommit: source.provenance.sourceCommit,
         binding,
@@ -479,9 +512,16 @@ const evidence = {
   disposed: true,
   allObservedSupervisorsExited: true,
   slotUnchanged: true,
+  controllerAuthorityChecked: true,
   pids: [...pids],
   bootSnapshots,
   stages,
 };
-await writeFile(path.join(evidenceRoot, "result.json"), JSON.stringify(evidence, null, 2));
-console.log(JSON.stringify(evidence, null, 2));
+await writeFile(path.join(evidenceRoot, "result.json"), evidenceJson(evidence, null, 2));
+await assertNoControllerTokens(
+  evidenceRoot,
+  [...launches.values()].map((launch) => launch.controllerToken),
+);
+evidence.controllerTokensRedacted = true;
+await writeFile(path.join(evidenceRoot, "result.json"), evidenceJson(evidence, null, 2));
+console.log(evidenceJson(evidence, null, 2));

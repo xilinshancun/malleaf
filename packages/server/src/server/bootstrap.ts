@@ -1,3 +1,4 @@
+import { loadControllerAuthority } from "./malleaf/controller-authority.js";
 import { malleafDaemonEndpoint } from "@getpaseo/protocol/malleaf/product-identity";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import {
@@ -616,6 +617,10 @@ export async function createPaseoDaemon(
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
+  const controllerAuthority = await loadControllerAuthority(
+    config.paseoHome,
+    process.env.MALLEAF_CONTROLLER_AUTHORITY_HASH,
+  );
   const malleafIdentity = await readMalleafRuntimeIdentity({
     manifestPath: process.env.MALLEAF_SLOT_MANIFEST,
     moduleUrl: import.meta.url,
@@ -1869,6 +1874,7 @@ export async function createPaseoDaemon(
               {
                 listen: formatListenTarget(boundListenTarget ?? listenTarget),
                 malleafIdentity,
+                controllerAuthority,
                 quiesce,
                 worktreesRoot: config.worktreesRoot,
                 get appBaseUrl() {

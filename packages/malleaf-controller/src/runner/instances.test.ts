@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { documentSchema, initialDocument, openOwnedDocument } from "./document.js";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -69,10 +70,14 @@ test("future fields survive but newer writer requirements prevent mutation", asy
   await compatible.intent("baseline", options.launch);
   expect(await compatible.read()).toMatchObject({ future: { preserve: true } });
   await compatible.seal();
-  const future = { ...(await compatibleState(options.filename)), minWriterVersion: 2 };
+  const future = {
+    ...(await compatibleState(options.filename)),
+    schemaVersion: 3,
+    minWriterVersion: 3,
+  };
   await writeFile(options.filename, JSON.stringify(future));
   const readOnly = await openInstanceLedger(options);
-  expect((await readOnly.read()).minWriterVersion).toBe(2);
+  expect((await readOnly.read()).minWriterVersion).toBe(3);
   await expect(readOnly.clear("baseline", options.launch.token)).rejects.toMatchObject({
     code: "unsupported_schema",
   });
@@ -123,4 +128,31 @@ test("runner symlinks cannot redirect the ledger outside the product home", asyn
   await mkdir(external);
   await symlink(external, path.join(options.home, "runner"), "junction");
   await expect(openInstanceLedger(options)).rejects.toMatchObject({ code: "unsafe_path" });
+});
+
+test("authority intent upgrades the ledger atomically and clearing never reopens it to old controllers", async () => {
+  const f = await fixture();
+  const intent = { ...f.launch, controllerToken: randomBytes(32).toString("hex") };
+  await f.ledger.intent("baseline", intent);
+  expect(await f.ledger.read()).toMatchObject({
+    schemaVersion: 2,
+    minReaderVersion: 2,
+    minWriterVersion: 2,
+    registrations: { baseline: { controllerToken: intent.controllerToken } },
+  });
+  await f.ledger.clear("baseline", intent.token);
+  expect(await f.ledger.read()).toMatchObject({
+    minReaderVersion: 2,
+    minWriterVersion: 2,
+    registrations: {},
+  });
+  // The pre-authority reader contract fails before activation/recovery can run.
+  await expect(
+    openOwnedDocument({
+      ...f,
+      name: "instances.json",
+      schema: documentSchema,
+      initial: initialDocument(),
+    }),
+  ).rejects.toMatchObject({ code: "unsupported_schema" });
 });

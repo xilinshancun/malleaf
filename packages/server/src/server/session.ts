@@ -2222,6 +2222,7 @@ export class Session {
         return;
       }
       try {
+        if (!this.daemonSession.permitsControllerRequest(msg)) return;
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));

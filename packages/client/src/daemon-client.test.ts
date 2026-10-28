@@ -8488,6 +8488,17 @@ test("gates atomic Malleaf drain commit separately from ordinary quiesce", async
   expect(client.supportsMalleaf()).toBe(true);
   expect(client.supportsMalleafQuiesceCommit()).toBe(false);
   expect(client.supportsMalleafBootDrain()).toBe(false);
+  expect(client.supportsMalleafControllerAuthority()).toBe(false);
+  await expect(
+    client.quiesceDaemon({
+      action: "begin",
+      drainId: "12345678-1234-4234-8234-123456789abc",
+      controllerToken: "a".repeat(64),
+    }),
+  ).rejects.toThrow("Update the host to support Malleaf controller authority.");
+  await expect(client.shutdownServer({ controllerToken: "a".repeat(64) })).rejects.toThrow(
+    "Update the host to support Malleaf controller authority.",
+  );
   await expect(
     client.quiesceDaemon({ action: "commit", drainId: "00000000-0000-4000-8000-000000000001" }),
   ).rejects.toThrow("Update the host to support atomic Malleaf drain commit.");

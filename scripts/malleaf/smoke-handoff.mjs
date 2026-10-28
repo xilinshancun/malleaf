@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evidenceJson, copyRunnerEvidence } from "./smoke-audit.mjs";
 // Copied-controller handoff acceptance in disposable, mock-only product state.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -201,7 +202,7 @@ async function command(record, name, params = {}, allowError = false) {
   const response = record.messages.find(
     (m) => m.type === "malleaf.controller.result" && m.requestId === requestId,
   );
-  if (!allowError) assert.equal(response.ok, true, JSON.stringify(response.error));
+  if (!allowError) assert.equal(response.ok, true, evidenceJson(response.error));
   return response;
 }
 async function live(pair) {
@@ -380,6 +381,7 @@ try {
         observedPids.add(registration.instance.pid);
         await stopRuntimeInstance({
           daemonHome: registration.home,
+          controllerToken: registration.controllerToken,
           instance: registration.instance,
           assertOwned: owner.assertOwned,
           clientId: randomUUID(),
@@ -390,7 +392,10 @@ try {
         errors.push(error);
       }
     }
-    await writeFile(path.join(evidenceRoot, "instances.json"), await readFile(ledgerFile));
+    await writeFile(
+      path.join(evidenceRoot, "instances.json"),
+      evidenceJson(JSON.parse(await readFile(ledgerFile, "utf8"))),
+    );
   } finally {
     await owner.release({ seal: ledger.seal });
   }
@@ -415,9 +420,7 @@ for (const child of children) {
   await writeFile(path.join(evidenceRoot, `${child.name}.stdout.log`), child.stdout);
   await writeFile(path.join(evidenceRoot, `${child.name}.stderr.log`), child.stderr);
 }
-await cp(path.join(prepared.home, "runner"), path.join(evidenceRoot, "runner"), {
-  recursive: true,
-});
+await copyRunnerEvidence(prepared.home, path.join(evidenceRoot, "runner"));
 const result = {
   sourceCommit: source.provenance.sourceCommit,
   binding,
@@ -440,7 +443,7 @@ const result = {
   causes: failure instanceof AggregateError ? failure.errors.map(String) : [],
 };
 if (failure) {
-  await writeFile(path.join(evidenceRoot, "failure.json"), JSON.stringify(result, null, 2));
+  await writeFile(path.join(evidenceRoot, "failure.json"), evidenceJson(result, null, 2));
   throw failure;
 }
 async function makeRemovable(directory) {
@@ -457,5 +460,5 @@ Object.assign(result, {
   hostMetadataUnchanged: true,
   slotUnchanged: true,
 });
-await writeFile(path.join(evidenceRoot, "result.json"), JSON.stringify(result, null, 2));
-process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+await writeFile(path.join(evidenceRoot, "result.json"), evidenceJson(result, null, 2));
+process.stdout.write(`${evidenceJson(result, null, 2)}\n`);

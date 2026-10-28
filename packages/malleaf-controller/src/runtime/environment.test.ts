@@ -8,6 +8,7 @@ test("keeps host loaders out of the daemon while recording their original extern
     MALLEAF_HOST_NODE_OPTIONS: "forged",
     MALLEAF_HOST_NODE_PATH: "forged",
     PATH: "/usr/bin",
+    MALLEAF_CONTROLLER_TOKEN: "inherited-raw-secret",
   };
   const managed = isolateRuntimeNodeEnvironment(original);
   expect(managed).toMatchObject({
@@ -17,6 +18,8 @@ test("keeps host loaders out of the daemon while recording their original extern
     MALLEAF_HOST_NODE_PATH: original.NODE_PATH,
     PATH: original.PATH,
   });
+  expect(managed.MALLEAF_CONTROLLER_TOKEN).toBeUndefined();
+  expect(JSON.stringify(managed)).not.toContain("inherited-raw-secret");
   expect(original.NODE_OPTIONS).toContain("--require");
   expect(isolateRuntimeNodeEnvironment({})).toMatchObject({
     MALLEAF_HOST_NODE_OPTIONS: "",

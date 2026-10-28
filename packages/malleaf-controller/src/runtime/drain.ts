@@ -33,11 +33,13 @@ export async function drainAndCommit(options: {
   const deadline = Date.now() + deadlineMs;
   assertOwned();
   try {
-    await runtime.client.quiesceDaemon({ action: "begin", drainId, deadlineMs });
+    await runtime.quiesce({ action: "begin", drainId, deadlineMs });
     while (Date.now() < deadline) {
       assertOwned();
-      const status = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+      const status = await runtime.quiesce({ action: "status", deadlineMs: 1000 });
       if (status.state !== "draining" || status.drainId !== drainId) return false;
+      // Resource status is advisory, not an atomic barrier. Pause without stopping.
+      if (status.terminals || status.scripts) break;
       if (!hasPendingDrainWork(status)) {
         assertOwned();
         if (await tryCommit(runtime, drainId)) return true;
@@ -49,15 +51,15 @@ export async function drainAndCommit(options: {
   }
   // No stop signal is sent on timeout. If our lease is still held, release it.
   assertOwned();
-  const status = await runtime.client.quiesceDaemon({ action: "status", deadlineMs: 1000 });
+  const status = await runtime.quiesce({ action: "status", deadlineMs: 1000 });
   if (status.state === "draining" && status.drainId === drainId)
-    await runtime.client.quiesceDaemon({ action: "end", drainId, deadlineMs: 1000 });
+    await runtime.quiesce({ action: "end", drainId, deadlineMs: 1000 });
   return false;
 }
 
 async function tryCommit(runtime: RuntimeHandle, drainId: string): Promise<boolean> {
   try {
-    await runtime.client.quiesceDaemon({ action: "commit", drainId, deadlineMs: 1000 });
+    await runtime.quiesce({ action: "commit", drainId, deadlineMs: 1000 });
     return true;
   } catch (error) {
     if (errorCode(error) !== "drain_busy") throw error;

@@ -1,3 +1,4 @@
+import { publishRuntimeAuthority } from "./authority.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -51,6 +52,7 @@ vi.mock("./daemon.js", async (importOriginal) => {
     },
     launchRuntime: async (options: {
       daemonHome: string;
+      controllerToken: string;
       environment: NodeJS.ProcessEnv;
       recordInstance(instance: DaemonInstance): Promise<void>;
     }) => {
@@ -69,6 +71,7 @@ vi.mock("./daemon.js", async (importOriginal) => {
         listen: "127.0.0.1:1",
       };
       await mkdir(home, { recursive: true });
+      await publishRuntimeAuthority(home, options.controllerToken, () => {});
       await writeFile(path.join(home, "paseo.pid"), JSON.stringify(instance));
       await options.recordInstance(instance);
       const status: MalleafQuiesceStatus = {
@@ -117,6 +120,7 @@ vi.mock("./daemon.js", async (importOriginal) => {
         },
         stop: () => stop({ daemonHome: home, instance }),
       } as unknown as RuntimeHandle;
+      handle.quiesce = (request) => handle.client.quiesceDaemon(request);
       fake.live.set(home, handle);
       if (fake.fail?.dataId === dataId) {
         fake.fail = null;
@@ -475,4 +479,15 @@ test("trial can revert a failed boot release without first opening admission or 
   expect(reverted.pointer.current).toEqual(f.baseline);
   expect(fake.events).not.toContain("rpc:candidate:begin");
   expect(fake.events).toContain("rpc:candidate:commit");
+});
+
+test("reported terminal resources pause activation without stopping the baseline", async () => {
+  const f = await fixture();
+  const status = fake.status.get(path.join(await realpath(f.home), "data/baseline"))!;
+  status.terminals = 1;
+  const result = await f.controller.activate(f.request);
+  expect(result.transaction?.step).toBe("drain_timeout");
+  expect(result.pointer.current).toEqual(f.baseline);
+  expect(status.state).toBe("accepting");
+  expect(fake.events).not.toContain("stop:baseline");
 });

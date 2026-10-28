@@ -1,3 +1,5 @@
+import type { DaemonQuiesceRequest } from "@getpaseo/protocol/malleaf/quiesce";
+import { publishRuntimeAuthority, verifyRuntimeAuthority } from "./authority.js";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { createHostClient } from "@getpaseo/client/node";
@@ -32,6 +34,7 @@ interface RuntimeTarget {
   buildId: string;
   daemonHome: string;
   clientId: string;
+  controllerToken: string;
   assertOwned(): void;
   timeoutMs?: number;
 }
@@ -45,7 +48,7 @@ interface RuntimeAttachOptions extends RuntimeTarget {
 }
 interface RuntimeStopOptions extends Pick<
   RuntimeTarget,
-  "daemonHome" | "clientId" | "assertOwned"
+  "daemonHome" | "clientId" | "assertOwned" | "controllerToken"
 > {
   instance: DaemonInstance;
 }
@@ -92,6 +95,8 @@ async function verifyRuntimeHandshake(
   if (
     !info ||
     info.features?.malleaf !== true ||
+    info.features?.malleafControllerAuthority !== true ||
+    info.malleaf?.controllerOwned !== true ||
     !info.permissions?.includes("daemon.manage") ||
     info.malleaf?.buildId !== manifest.buildId ||
     info.malleaf.product !== manifest.provenance.product ||
@@ -132,13 +137,14 @@ async function verifyRuntimeSlot(options: RuntimeTarget) {
 export async function stopRuntimeInstance(options: RuntimeStopOptions): Promise<void> {
   options.assertOwned();
   assertStoragePath(options.daemonHome);
+  await verifyRuntimeAuthority(options.daemonHome, options.controllerToken);
   await stopDaemonInstance(options.daemonHome, {
     instance: options.instance,
     timeoutMs: 15_000,
     requestShutdown: async (ready) => {
       const client = await connectRuntime(options.daemonHome, ready.listen, options.clientId, 5000);
       try {
-        await client.shutdownServer({ timeout: 5000 });
+        await client.shutdownServer({ timeout: 5000, controllerToken: options.controllerToken });
       } finally {
         await client.close();
       }
@@ -166,6 +172,8 @@ async function connectRuntimeHandle(
     return {
       instance,
       client,
+      quiesce: (request: Omit<DaemonQuiesceRequest, "type" | "requestId" | "controllerToken">) =>
+        client.quiesceDaemon({ ...request, controllerToken: options.controllerToken }),
       manifest,
       info,
       entryHashes: Object.fromEntries(
@@ -193,6 +201,7 @@ async function connectRuntimeHandle(
 // observed pid-lock. A failed attach never stops the process it was inspecting.
 export async function attachRuntime(options: RuntimeAttachOptions) {
   const { manifest } = await verifyRuntimeSlot(options);
+  await verifyRuntimeAuthority(options.daemonHome, options.controllerToken);
   const live = await readDaemonInstance(options.daemonHome);
   if (!live || !isSameDaemonInstance(live, options.expected))
     throw new StorageError(
@@ -226,6 +235,12 @@ export async function launchRuntime(options: RuntimeLaunchOptions) {
         "Refusing to launch over an existing daemon instance",
       );
     options.assertOwned();
+    const authorityHash = await publishRuntimeAuthority(
+      options.daemonHome,
+      options.controllerToken,
+      options.assertOwned,
+    );
+    options.assertOwned();
     spawnAttempted = true;
     const started = await startDaemonInstance({
       home: options.daemonHome,
@@ -237,6 +252,8 @@ export async function launchRuntime(options: RuntimeLaunchOptions) {
       env: {
         ...isolateRuntimeNodeEnvironment(options.environment),
         MALLEAF_DAEMON_HOME: options.daemonHome,
+        MALLEAF_CONTROLLER_TOKEN: undefined,
+        MALLEAF_CONTROLLER_AUTHORITY_HASH: authorityHash,
         MALLEAF_SLOT_MANIFEST: path.join(slot, "malleaf.json"),
       },
       onAcquired(instance) {
