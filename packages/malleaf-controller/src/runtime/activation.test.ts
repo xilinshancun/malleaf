@@ -220,6 +220,19 @@ test("healthy trial, keep and repeated request preserve the original epoch", asy
   );
 });
 
+test("a controller with its own fake HOME can create a sibling preflight directory", async () => {
+  const f = await fixture();
+  vi.stubEnv("HOME", f.environment.HOME);
+  vi.stubEnv("USERPROFILE", f.environment.HOME);
+  vi.stubEnv("APPDATA", path.join(f.environment.HOME, "AppData"));
+  try {
+    const result = await f.controller.activate(f.request);
+    expect(result.transaction?.step).toBe("trial");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 test("candidate controller self-check failure aborts before daemon preflight or baseline drain", async () => {
   const f = await fixture();
   fake.events.length = 0;

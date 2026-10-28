@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpath, readdir } from "node:fs/promises";
+import { mkdir, realpath, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BUILTIN_PROVIDER_IDS } from "@getpaseo/protocol/provider-manifest";
@@ -20,7 +20,7 @@ import type {
   InstanceRegistration,
   InstanceRole,
 } from "../runner/instances.js";
-import { exists, isWithin, readJson, StorageError } from "../storage.js";
+import { containedRealPath, exists, isWithin, readJson, StorageError } from "../storage.js";
 import {
   attachRuntime,
   launchRuntime,
@@ -31,7 +31,7 @@ import {
 import { drainAndCommit, hasPendingDrainWork } from "./drain.js";
 import { preparePreflight } from "./preflight.js";
 import { epochHome, inspectRecovery, type RecoveryPlan } from "./recovery.js";
-import { assertAcceptanceBoundary } from "../isolation.js";
+import { assertAcceptanceBoundary, assertStoragePath } from "../isolation.js";
 import { verifyCandidateController } from "./controller-probe.js";
 
 type PointerStore = Awaited<ReturnType<typeof openPointerStore>>;
@@ -208,6 +208,7 @@ export async function createIsolatedActivation(options: {
   }
   async function preflight(transaction: SwitchTransaction) {
     await journal.advance(transaction.switchId, "preflight");
+    let scratch: Awaited<ReturnType<typeof preparePreflight>>;
     try {
       await verifyCandidateController({
         slotDirectory: slot(transaction.candidate),
@@ -217,14 +218,20 @@ export async function createIsolatedActivation(options: {
         environment: options.environment,
         assertOwned,
       });
+      // The controller's fake HOME is inside root. A scratch parent must be a
+      // sibling of that HOME, never an ancestor of its protected product paths.
+      const scratchRoot = path.join(root, "tmp");
+      assertStoragePath(scratchRoot);
+      await mkdir(scratchRoot, { recursive: true });
+      await containedRealPath(root, scratchRoot);
+      scratch = await preparePreflight({
+        slotDirectory: slot(transaction.candidate),
+        scratchRoot,
+      });
     } catch (error) {
       await journal.advance(transaction.switchId, "aborted", String(error));
       throw error;
     }
-    const scratch = await preparePreflight({
-      slotDirectory: slot(transaction.candidate),
-      scratchRoot: root,
-    });
     let safeToDispose = false;
     try {
       const handle = await launch(
